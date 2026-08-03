@@ -17,6 +17,10 @@ venv/
 coverage.xml
 htmlcov/
 
+# Sample apps resolve the SDK from a local path, so their locks are not portable.
+samples/*/uv.lock
+.env
+
 .DS_Store
 .idea/
 *.swp

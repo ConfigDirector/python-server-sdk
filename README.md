@@ -150,6 +150,17 @@ inherit from the built-in exception you would expect, so ordinary handlers keep 
 | `ConfigDirectorConnectionError` | — | The SDK cannot reach the ConfigDirector servers |
 | `ConfigDirectorInitializationError` | — | The client cannot be initialized |
 
+## Sample apps
+
+[`samples/`](samples/) holds small, runnable applications built on this SDK, one per web
+framework. Start with [`samples/flask`](samples/flask/):
+
+```bash
+cd samples/flask
+uv run flask --app app run --port 3600
+curl 'http://localhost:3600/configs?id=user-123&plan=pro'
+```
+
 ## Development
 
 This project uses [uv](https://docs.astral.sh/uv/).

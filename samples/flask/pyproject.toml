@@ -1,0 +1,39 @@
+[project]
+name = "configdirector-flask-sample"
+version = "0.0.0"
+description = "Flask sample app for the ConfigDirector Python server SDK"
+requires-python = ">=3.10"
+dependencies = [
+  "configdirector-server-sdk",
+  "flask>=3.1",
+  "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = ["mypy>=1.14", "pytest>=8.3"]
+
+[tool.uv]
+# A runnable app, not a distributable package: install the dependencies, not this project.
+package = false
+
+[tool.uv.sources]
+# Always run against the SDK in this repository rather than a published release.
+configdirector-server-sdk = { path = "../..", editable = true }
+
+[tool.ruff]
+# Inherit the SDK's style, but resolve first-party imports against this directory so that
+# `configdirector` sorts as the third-party dependency it is here.
+extend = "../../pyproject.toml"
+src = ["."]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["."]
+strict = true
+# `strict` bans implicit re-exports to protect library public APIs. This is an application, and
+# `from configdirector_client import client` is meant to be reachable as `app.client`.
+no_implicit_reexport = false
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+addopts = "-ra"
