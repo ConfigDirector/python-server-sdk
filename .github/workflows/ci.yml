@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# The checks themselves live in the Makefile so that CI and the pre-push hook cannot drift
+# apart. bash everywhere keeps the make recipes portable across the runner images.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   lint:
     name: Lint + Typecheck
@@ -20,17 +26,9 @@ jobs:
         with:
           enable-cache: true
 
-      - name: uv sync
-        run: uv sync --all-extras --frozen
-
-      - name: ruff check
-        run: uv run ruff check .
-
-      - name: ruff format --check
-        run: uv run ruff format --check .
-
-      - name: mypy
-        run: uv run mypy
+      - run: make verify-lock
+      - run: make lint
+      - run: make typecheck
 
   test:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
@@ -54,11 +52,8 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
 
-      - name: uv sync
-        run: uv sync --all-extras --frozen
-
-      - name: pytest
-        run: uv run pytest --cov --cov-report=term-missing
+      - run: make verify-lock
+      - run: make coverage
 
   build:
     name: Build distribution
@@ -71,17 +66,8 @@ jobs:
         with:
           enable-cache: true
 
-      - name: uv build
-        run: uv build
-
-      - name: Check distribution metadata
-        run: uvx twine check dist/*
-
-      - name: Verify the wheel imports cleanly
-        run: |
-          uv venv /tmp/smoke
-          VIRTUAL_ENV=/tmp/smoke uv pip install dist/*.whl
-          /tmp/smoke/bin/python -c "import configdirector; print(configdirector.__version__)"
+      # Builds into dist/, checks the metadata, and imports the wheel in a clean environment.
+      - run: make dist-check
 
       - uses: actions/upload-artifact@v4
         with:
@@ -91,10 +77,6 @@ jobs:
   samples:
     name: Sample apps
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        sample: [flask]
     steps:
       - uses: actions/checkout@v5
 
@@ -103,15 +85,5 @@ jobs:
         with:
           enable-cache: true
 
-      # Samples resolve the SDK from a local path, so they are not locked against a release.
-      - name: uv sync
-        run: uv sync
-        working-directory: ./samples/${{ matrix.sample }}
-
-      - name: mypy
-        run: uv run mypy
-        working-directory: ./samples/${{ matrix.sample }}
-
-      - name: pytest
-        run: uv run pytest
-        working-directory: ./samples/${{ matrix.sample }}
+      # Each sample resolves the SDK by local path, so it is not locked against a release.
+      - run: make samples

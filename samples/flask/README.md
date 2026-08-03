@@ -87,7 +87,7 @@ lands in the application's logging namespace rather than the SDK's:
 
 ```python
 sdk_logger = logging.getLogger("flask_sample.configdirector")
-sdk_logger.setLevel(os.environ.get("CONFIGDIRECTOR_LOG_LEVEL", "DEBUG"))
+sdk_logger.setLevel(os.environ.get("CONFIGDIRECTOR_LOG_LEVEL", "INFO"))
 
 client = ConfigDirectorClient(..., logger=sdk_logger)
 ```
@@ -99,8 +99,8 @@ flask_sample.configdirector DEBUG No config state found for 'integer-config', re
 Any object with `debug`/`info`/`warning`/`error` methods works — a stdlib `Logger` satisfies
 that, and so does `create_console_logger("debug")` if you would rather not configure the
 `logging` module at all. Omit `logger=` entirely and the SDK falls back to the standard library
-logger named `configdirector`. The sample defaults to `DEBUG` so you can watch every evaluation
-as it happens; set `CONFIGDIRECTOR_LOG_LEVEL=INFO` to quiet it down.
+logger named `configdirector`. Set `CONFIGDIRECTOR_LOG_LEVEL=DEBUG` to watch every evaluation as
+it happens.
 
 **Shutdown is clean.** `atexit` closes the client, dropping connections and flushing pending
 telemetry. A production deployment would also hook its server's worker-exit signal.

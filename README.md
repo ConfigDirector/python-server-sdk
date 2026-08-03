@@ -167,12 +167,37 @@ This project uses [uv](https://docs.astral.sh/uv/).
 
 ```bash
 make install     # uv sync --all-extras
+make hooks       # install the pre-push hook (once, per clone)
+
 make test        # pytest
 make lint        # ruff check + ruff format --check
 make typecheck   # mypy
-make check       # lint + typecheck + test
+make samples     # typecheck and test every app under samples/
 make build       # build the sdist and wheel
+make dist-check  # build, validate the metadata, import the wheel in a clean env
+
+make check       # lint + typecheck + test — the fast loop
+make check-all   # everything CI runs
 ```
+
+CI and the pre-push hook both call these targets rather than repeating the commands, so the
+three cannot drift apart.
+
+### Pre-push hook
+
+`make hooks` points `core.hooksPath` at [`.githooks/`](.githooks/), so
+[`.githooks/pre-push`](.githooks/pre-push) runs `make check-all` before every push: lockfile,
+lint, formatting, types, tests, a real distribution build, and every sample app. It takes a few
+seconds.
+
+Pushes that only delete remote refs skip the checks. To bypass it for a single push:
+
+```bash
+git push --no-verify
+```
+
+Note that the hook checks your working tree, not the commits being pushed, so uncommitted
+changes count.
 
 ## Documentation
 

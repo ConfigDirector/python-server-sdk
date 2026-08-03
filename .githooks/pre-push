@@ -1,0 +1,47 @@
+#!/usr/bin/env sh
+#
+# Runs `make check-all` — the same lint, type, test, distribution, and sample-app checks that
+# CI runs — before allowing a push. The checks themselves live in the Makefile so that this
+# hook and CI cannot drift apart; this script only adds the git-specific parts.
+#
+# Install it with `make hooks` (which points core.hooksPath at this directory).
+# Bypass it for a single push with `git push --no-verify`.
+#
+# Note: this checks the working tree, not the commits being pushed. Uncommitted changes are
+# included, which is usually what you want and occasionally surprising.
+
+set -eu
+
+# --- skip when the push only deletes remote refs -----------------------------------------
+# git feeds "<local ref> <local sha> <remote ref> <remote sha>" per ref on stdin. A deletion
+# has an all-zero local sha and nothing to check. Skip the read entirely when run from a
+# terminal, so the hook stays runnable by hand.
+if [ ! -t 0 ]; then
+    saw_ref=0
+    only_deletes=1
+    while read -r _local_ref local_sha _remote_ref _remote_sha; do
+        saw_ref=1
+        case "$local_sha" in
+            *[!0]*) only_deletes=0 ;;
+        esac
+    done
+    if [ "$saw_ref" -eq 1 ] && [ "$only_deletes" -eq 1 ]; then
+        echo "pre-push: deleting refs only, nothing to check."
+        exit 0
+    fi
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+for tool in make uv; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "pre-push: $tool is not installed, cannot run the checks."
+        [ "$tool" = uv ] && echo "  see https://docs.astral.sh/uv/getting-started/installation/"
+        exit 1
+    fi
+done
+
+if ! make check-all; then
+    printf '\n%s\n' "pre-push FAILED. Fix the problem above, or bypass with: git push --no-verify"
+    exit 1
+fi
