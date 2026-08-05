@@ -25,3 +25,4 @@ samples/*/uv.lock
 .idea/
 *.swp
 .claude
+.vscode
