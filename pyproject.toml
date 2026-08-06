@@ -33,7 +33,8 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
-dependencies = []
+
+dependencies = ["urllib3>=2.7,<3"]
 
 [project.urls]
 Homepage = "https://www.configdirector.com"
@@ -80,7 +81,11 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+# Test builders mirror the dataclass fields they construct, including `id` and `type`.
+"tests/*" = ["S101", "A002"]
+
+[tool.ruff.lint.isort]
+known-local-folder = ["helpers"]
 
 [tool.ruff.format]
 quote-style = "double"

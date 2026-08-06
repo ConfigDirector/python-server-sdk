@@ -3,10 +3,9 @@
 This is the Python server SDK for [ConfigDirector](https://www.configdirector.com), a remote
 configuration and feature flag service.
 
-> **Status: stage 1 — API preview.** The public API below is complete and stable, but the
-> implementation is stubbed: no network calls are made and every config evaluation returns the
-> default value you supply. Code written against this release will keep working as the
-> implementation lands.
+> **Status: pre-release.** Config retrieval and evaluation are implemented. Telemetry
+> reporting is not yet wired up, so the dashboard will not show usage insights for
+> applications running this release.
 
 ## Installation
 
@@ -67,6 +66,21 @@ with client.watch("new-checkout", False, on_change):
     ...
 ```
 
+The callback runs on the SDK's background connection thread rather than the thread that
+registered it, so keep it quick and thread-safe. An exception it raises is logged and does not
+affect other watchers.
+
+### Reading every config at once
+
+`get_all_configs()` returns the evaluated `ConfigState` for every known key, intended for
+server-side rendering hydration. It records no telemetry, and returns an empty mapping until the
+client is ready.
+
+```python
+states = client.get_all_configs(context=Context(id="user-123"))
+states = client.get_all_configs(config_keys=["new-checkout", "theme"])
+```
+
 ### Events
 
 `on()` also returns a `Subscription`:
@@ -98,7 +112,14 @@ client = ConfigDirectorClient(
 )
 ```
 
-All durations are expressed in **seconds**.
+| Mode | Behaviour |
+|---|---|
+| `streaming` (default) | Holds a connection open and receives updates as configs change in the dashboard |
+| `polling` | Fetches config state during initialization, then re-fetches every `polling_interval` |
+| `one-time` | Fetches config state during initialization only, and never refreshes it |
+
+All durations are expressed in **seconds**. Set `url=` only when routing through a proxy to
+reach ConfigDirector.
 
 ### Logging
 

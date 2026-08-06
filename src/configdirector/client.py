@@ -1,22 +1,21 @@
-"""The ConfigDirector client.
-
-.. note::
-   Stage 1 scaffolding. The public surface is final, but everything that would touch the
-   network or evaluate targeting rules is stubbed with hard-coded values. Every such stub is
-   tagged with a ``STUB:`` comment.
-"""
+"""The ConfigDirector client."""
 
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Literal, overload
+from typing import Any, Literal, cast, overload
 from urllib.parse import urlparse
 
-from ._version import __version__
+from ._bundle import ConfigBundle
+from ._transport import TransportOptions, create_transport
+from ._value_parser import parse_config_value
+from ._version import SDK_NAME, __version__
 from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
+from .evaluation import Config, ConfigEvaluator, EvaluationContext
 from .logger import get_default_logger
 from .types import (
     ClientEvent,
@@ -40,30 +39,11 @@ from .types import (
 
 __all__ = ["ConfigDirectorClient", "create_client"]
 
-SDK_NAME = "python-server-sdk"
 DEFAULT_BASE_URL = "https://server-sdk-api.configdirector.com"
 
 _EVENT_NAMES: frozenset[str] = frozenset({"client_ready", "configs_updated", "config_evaluated"})
 
 _VALID_VALUE_TYPES: tuple[type, ...] = (str, int, float, bool, dict, list)
-
-# STUB: stands in for the config state that will arrive from the server in a later stage.
-_STUB_CONFIG_STATES: dict[str, ConfigState] = {
-    "example-boolean-config": ConfigState(
-        id="cfg_stub_boolean",
-        key="example-boolean-config",
-        type="boolean",
-        value="true",
-        value_id="val_stub_boolean",
-    ),
-    "example-string-config": ConfigState(
-        id="cfg_stub_string",
-        key="example-string-config",
-        type="string",
-        value="stub-value",
-        value_id="val_stub_string",
-    ),
-}
 
 
 @dataclass(slots=True, eq=False)  # identity comparison: two identical watches stay distinct
@@ -130,8 +110,22 @@ class ConfigDirectorClient:
         self._lock = threading.RLock()
         self._ready = False
         self._closed = False
+        self._configs: dict[str, Config] | None = None
         self._watchers: dict[str, list[_Watcher]] = {}
         self._event_handlers: dict[str, list[Callable[[Any], None]]] = {name: [] for name in _EVENT_NAMES}
+        self._ready_event = threading.Event()
+        self._evaluator = ConfigEvaluator(self._logger)
+        self._transport = create_transport(
+            self._connection.mode,
+            TransportOptions(
+                server_sdk_key=server_sdk_key,
+                base_url=self._base_url,
+                meta_context=_meta_context(self._metadata, self._sdk_name, self._sdk_version),
+                logger=self._logger,
+                on_bundle=self._on_bundle,
+                polling_interval=self._connection.polling_interval,
+            ),
+        )
 
         if hooks is not None:
             for event, handler in (
@@ -181,14 +175,28 @@ class ConfigDirectorClient:
             effective_timeout,
         )
 
-        # STUB: no transport yet. A later stage connects, waits for the initial config bundle,
-        # and only marks the client ready once that bundle arrives (or logs a timeout warning).
-        with self._lock:
-            self._ready = True
+        started = time.monotonic()
+        try:
+            self._transport.connect(effective_timeout)
+        except Exception as error:
+            self._logger.error("An error occurred during initialization: %r", error)
+            return
 
-        self._emit("client_ready", ClientReadyEvent())
-        self._emit("configs_updated", ConfigsUpdatedEvent(keys=sorted(_STUB_CONFIG_STATES)))
-        self._logger.debug("Received initial payload from the server, client is ready")
+        remaining = effective_timeout - (time.monotonic() - started)
+        if remaining > 0:
+            self._ready_event.wait(remaining)
+
+        if not self.is_ready:
+            details = (
+                "The client will continue to retry since there were no fatal errors detected. "
+                "Configs will return the default value until the connection succeeds."
+                if self._connection.mode == "streaming"
+                else "Since the client was configured without streaming, configs may not update "
+                "and will always return the default value."
+            )
+            self._logger.warning(
+                "Timed out waiting for initialization after %ss. %s", effective_timeout, details
+            )
 
     @property
     def is_ready(self) -> bool:
@@ -221,8 +229,54 @@ class ConfigDirectorClient:
             for handlers in self._event_handlers.values():
                 handlers.clear()
 
-        # STUB: a later stage closes the transport and flushes pending telemetry here.
+        self._ready_event.set()  # release anyone still blocked in initialize()
+        self._transport.close()
         self._logger.debug("close() has been called, the client is now closed")
+
+    # -- config state -----------------------------------------------------------------------
+
+    def _on_bundle(self, bundle: ConfigBundle) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            if self._configs is None or bundle.kind == "full":
+                self._configs = dict(bundle.configs)
+            else:
+                self._configs.update(bundle.configs)
+
+            first_bundle = not self._ready
+            self._ready = True
+            # Snapshotted under the lock so that user callbacks, which run outside it, cannot
+            # observe the watcher list being edited from under them.
+            watchers = {
+                key: list(entries)
+                for key, entries in self._watchers.items()
+                if entries and key in bundle.configs
+            }
+
+        keys = sorted(bundle.configs)
+        self._logger.debug("Config state updated from the server with %d key(s): %r", len(keys), keys)
+        self._emit("configs_updated", ConfigsUpdatedEvent(keys=keys))
+        self._notify_watchers(watchers, bundle.configs)
+
+        if first_bundle:
+            self._ready_event.set()
+            self._emit("client_ready", ClientReadyEvent())
+            self._logger.debug("Received the initial payload from the server, the client is ready")
+
+    def _notify_watchers(self, watchers: dict[str, list[_Watcher]], configs: dict[str, Config]) -> None:
+        # Evaluated against the bundle rather than the merged state: a watcher only fires for a
+        # key the update carried, and for those two are the same definition.
+        for config_key, entries in watchers.items():
+            definition = configs[config_key]
+            for watcher in entries:
+                try:
+                    value = self._evaluate(config_key, definition, watcher.default, watcher.context)
+                    watcher.handler(value)
+                except Exception as error:
+                    # One faulty watcher must not cost the others their update, and it must not
+                    # take down the transport thread this runs on.
+                    self._logger.error("A watcher for %r raised an exception: %r", config_key, error)
 
     def __enter__(self) -> ConfigDirectorClient:
         if not self.is_ready:
@@ -265,23 +319,58 @@ class ConfigDirectorClient:
         _validate_config_key(config_key)
         _validate_default(default)
 
-        # STUB: a later stage looks the config definition up in the received bundle and runs it
-        # through the evaluation engine. Until then every key falls back to the default.
-        reason: EvaluationReason = "config-state-missing" if self.is_ready else "client-not-ready"
-        self._logger.debug("No config state found for %r, returning default value %r", config_key, default)
+        with self._lock:
+            definition = self._configs.get(config_key) if self._configs is not None else None
+
+        return self._evaluate(config_key, definition, default, context)
+
+    def _evaluate(
+        self,
+        config_key: str,
+        definition: Config | None,
+        default: ConfigValueT,
+        context: Context | None,
+    ) -> ConfigValueT:
+        if definition is None:
+            reason: EvaluationReason = "config-state-missing" if self.is_ready else "client-not-ready"
+            self._logger.debug(
+                "No config state found for %r, returning default value %r", config_key, default
+            )
+            self._emit_evaluation(config_key, default, True, reason, None, context)
+            return default
+
+        state = self._evaluator.evaluate(
+            definition, EvaluationContext(context=context, metadata=self._metadata)
+        )
+        result = parse_config_value(state, default)
+        self._logger.debug("Evaluated %r to %r", config_key, result.value)
+        self._emit_evaluation(
+            config_key, result.value, result.used_default, result.reason, result.value_id, context
+        )
+        return cast(ConfigValueT, result.value)
+
+    def _emit_evaluation(
+        self,
+        config_key: str,
+        value: ConfigValue,
+        is_default: bool,
+        reason: EvaluationReason,
+        value_id: str | None,
+        context: Context | None,
+    ) -> None:
         self._emit(
             "config_evaluated",
             ConfigEvaluatedEvent(
                 evaluation=ConfigEvaluation(
                     key=config_key,
-                    value=default,
-                    is_default=True,
+                    value=value,
+                    is_default=is_default,
                     reason=reason,
+                    value_id=value_id,
                     context=context,
                 )
             ),
         )
-        return default
 
     def get_all_configs(
         self,
@@ -298,16 +387,19 @@ class ConfigDirectorClient:
             config_keys: Restrict the result to these keys. When omitted, every known key is
                 returned.
         """
-        if not self.is_ready:
-            return {}
+        with self._lock:
+            if not self._ready or self._configs is None:
+                return {}
+            if config_keys is None:
+                definitions = dict(self._configs)
+            else:
+                requested = set(config_keys)
+                definitions = {key: config for key, config in self._configs.items() if key in requested}
 
-        # STUB: a later stage evaluates each known config definition against `context`. The
-        # hard-coded states below are context-independent placeholders.
-        if config_keys is None:
-            return dict(_STUB_CONFIG_STATES)
-
-        requested = set(config_keys)
-        return {key: state for key, state in _STUB_CONFIG_STATES.items() if key in requested}
+        evaluation_context = EvaluationContext(context=context, metadata=self._metadata)
+        return {
+            key: self._evaluator.evaluate(config, evaluation_context) for key, config in definitions.items()
+        }
 
     # -- watching ---------------------------------------------------------------------
 
@@ -318,15 +410,20 @@ class ConfigDirectorClient:
         callback: WatchHandler[ConfigValueT],
         context: Context | None = None,
     ) -> Subscription:
-        """Watch a config for changes to its evaluated value.
+        """Watch a config for updates to its evaluated value.
 
-        Whenever the value changes, ``callback`` is invoked with the new value. Changes occur
-        when the config is updated in the ConfigDirector dashboard.
+        Whenever ConfigDirector sends an update to this config, it is re-evaluated against
+        ``context`` and ``callback`` is invoked with the resulting value. Updates originate from
+        changes made in the ConfigDirector dashboard.
+
+        The callback runs on the SDK's background connection thread, not the thread that
+        registered it, so it should be quick and must be safe to call from another thread. An
+        exception raised by a callback is logged and does not affect other watchers.
 
         Args:
             config_key: The config key to watch.
             default: The value referenced when config state is unavailable.
-            callback: Invoked with the new value whenever the config value changes.
+            callback: Invoked with the newly evaluated value on every update to the config.
             context: The user's context, used for targeting rule evaluation.
 
         Returns:
@@ -349,8 +446,6 @@ class ConfigDirectorClient:
         with self._lock:
             self._watchers.setdefault(config_key, []).append(watcher)
 
-        # STUB: no config updates are delivered yet, so registered callbacks never fire. A later
-        # stage re-evaluates each watcher when a config bundle arrives.
         return Subscription(lambda: self._remove_watcher(config_key, watcher))
 
     def unwatch(self, config_key: str, callback: WatchHandler[Any] | None = None) -> None:
@@ -514,6 +609,17 @@ def create_client(
         telemetry=telemetry,
         hooks=hooks,
     )
+
+
+def _meta_context(metadata: Metadata, sdk_name: str, sdk_version: str) -> dict[str, str]:
+    # The wire format is camelCase, and the server treats every field but the SDK identity as
+    # optional, so absent metadata is left out rather than sent as null.
+    context = {"sdkName": sdk_name, "sdkVersion": sdk_version}
+    if metadata.app_name is not None:
+        context["appName"] = metadata.app_name
+    if metadata.app_version is not None:
+        context["appVersion"] = metadata.app_version
+    return context
 
 
 def _is_blank(value: object) -> bool:

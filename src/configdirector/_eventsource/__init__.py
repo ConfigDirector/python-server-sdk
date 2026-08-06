@@ -7,7 +7,7 @@ from .errors import (
     ValueOutOfRangeError,
 )
 from .parser import EventSourceParser
-from .transport import StreamRequest, open_stream, set_read_timeout
+from .transport import StreamRequest, open_stream
 from .types import EventSourceMessage, ReadyState, ReconnectionState, ResponseStream
 
 __all__ = [
@@ -24,5 +24,4 @@ __all__ = [
     "StreamTooLargeError",
     "ValueOutOfRangeError",
     "open_stream",
-    "set_read_timeout",
 ]

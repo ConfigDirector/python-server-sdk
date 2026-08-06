@@ -18,6 +18,6 @@ cd samples/flask
 uv run flask --app app run --port 3600
 ```
 
-> **Stage 1 note.** The SDK's evaluation is still stubbed, so every config resolves to the
-> default value the sample passes in. The samples exist to demonstrate the API shape and
-> lifecycle; the values will become real as later stages land.
+> The samples need a real server SDK key to resolve configs. Without one the client stays
+> unready and every config falls back to the default the sample passes in, which is also what
+> a production app sees when it cannot reach ConfigDirector.

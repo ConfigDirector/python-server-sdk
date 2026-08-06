@@ -1,14 +1,24 @@
 from __future__ import annotations
 
-import urllib.error
-import urllib.request
-from collections.abc import Mapping
+import contextlib
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
 
+import urllib3
+from urllib3.exceptions import ProtocolError, ReadTimeoutError
+from urllib3.response import BaseHTTPResponse
+
+from .errors import StreamClosedError, StreamStalledError
 from .types import ResponseStream
 
-__all__ = ["StreamRequest", "open_stream", "set_read_timeout"]
+__all__ = ["StreamRequest", "open_stream"]
+
+# Reconnection, including its backoff, belongs to EventSourceClient. urllib3 must not quietly
+# retry underneath it, or a single logical attempt would become several.
+_NO_RETRIES = 0
+
+# Only relevant when the caller opted into redirects; urllib3 needs a bound either way.
+_MAX_REDIRECTS = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,49 +27,84 @@ class StreamRequest:
     method: str
     headers: Mapping[str, str]
     body: bytes | None
-    timeout: float | None
+    # Applies to establishing the connection only. Once the stream is open it must not bound
+    # how long the SDK waits for the next event.
+    connect_timeout: float | None
+    # How long a stream may stay silent before it is considered dead. None means indefinitely,
+    # which is what a stream fed by server-sent keepalives wants.
+    read_timeout: float | None
     follow_redirects: bool
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args: Any, **kwargs: Any) -> urllib.request.Request | None:
-        # Returning None leaves the 3xx to surface as a status rather than being followed.
-        return None
+_pool = urllib3.PoolManager()
 
 
-_FOLLOWING = urllib.request.build_opener()
-_NOT_FOLLOWING = urllib.request.build_opener(_NoRedirectHandler)
+class _Stream:
+    """Adapts a urllib3 response to `ResponseStream`, translating its errors into ours.
+
+    Keeping the translation here is what lets `EventSourceClient` stay transport-agnostic: it
+    only ever sees this SDK's own exception types, so a caller can supply a different transport
+    without urllib3 semantics leaking into the reader.
+    """
+
+    def __init__(self, response: BaseHTTPResponse) -> None:
+        self._response = response
+
+    @property
+    def status(self) -> int:
+        return self._response.status
+
+    def chunks(self, amount: int) -> Iterator[bytes]:
+        try:
+            while True:
+                # read1() hands back whatever has arrived. stream() is the obvious choice here
+                # and the wrong one: on a response delimited by the connection closing rather
+                # than by chunked framing it waits for `amount` bytes, so events would sit in a
+                # buffer until the server hung up.
+                data = self._response.read1(amount)
+                if not data:
+                    return
+                yield data
+        except ReadTimeoutError as error:
+            raise StreamStalledError(f"The stream went silent: {error}") from error
+        except ProtocolError as error:
+            # The peer went away, or close() cancelled the read from another thread. Both mean
+            # this response is finished; whether to reconnect is the reader's decision.
+            raise StreamClosedError(f"The response stream ended: {error}") from error
+
+    def close(self) -> None:
+        # Closing the response is not enough on its own: a read already in flight stays parked
+        # until the server happens to send something, so close() would hang behind an idle
+        # stream. shutdown() is urllib3's supported way to end that read from another thread.
+        # It objects when there is no longer a socket to shut down, which is exactly the case
+        # where no reader is parked on one.
+        with contextlib.suppress(ValueError, RuntimeError, OSError):
+            self._response.shutdown()
+        self._response.close()
 
 
 def open_stream(request: StreamRequest) -> ResponseStream:
-    prepared = urllib.request.Request(
+    response = _pool.request(
+        request.method,
         request.url,
-        data=request.body,
+        body=request.body,
         headers=dict(request.headers),
-        method=request.method,
+        timeout=urllib3.Timeout(connect=request.connect_timeout, read=request.read_timeout),
+        # The reader consumes the body incrementally; preloading it would block until the
+        # server closed the stream, which for SSE is never.
+        preload_content=False,
+        redirect=request.follow_redirects,
+        retries=urllib3.Retry(
+            total=None,
+            connect=_NO_RETRIES,
+            read=_NO_RETRIES,
+            status=_NO_RETRIES,
+            other=_NO_RETRIES,
+            redirect=_MAX_REDIRECTS if request.follow_redirects else _NO_RETRIES,
+            # An error response is still a response: the reader inspects the status and decides
+            # whether to reconnect, exactly as it would for a 2xx.
+            raise_on_status=False,
+            raise_on_redirect=False,
+        ),
     )
-    opener = _FOLLOWING if request.follow_redirects else _NOT_FOLLOWING
-    try:
-        return cast(ResponseStream, opener.open(prepared, timeout=request.timeout))
-    except urllib.error.HTTPError as error:
-        # An error response is still a response: the caller reads its status and decides whether
-        # to reconnect, exactly as it would for a 2xx.
-        return cast(ResponseStream, error)
-
-
-def set_read_timeout(response: ResponseStream, seconds: float) -> bool:
-    """Bound how long a single read may block, so the reader can notice it has been stopped.
-
-    Closing a response from another thread cannot do this: the reader holds the buffered
-    reader's lock while it waits, so close() would block until the read completed. Returns
-    False when the socket is not reachable, which leaves reads blocking until data arrives.
-    """
-    raw = getattr(getattr(response, "fp", None), "raw", None)
-    socket_ = getattr(raw, "_sock", None)
-    if socket_ is None:
-        return False
-    try:
-        socket_.settimeout(seconds)
-    except OSError:
-        return False
-    return True
+    return _Stream(response)

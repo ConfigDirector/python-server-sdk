@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 
 from configdirector._eventsource import StreamRequest
 
@@ -19,6 +19,12 @@ def wait_for(predicate: Callable[[], bool], *, timeout: float = WAIT_TIMEOUT) ->
 
 
 class FakeResponse:
+    """A `ResponseStream` whose body is a fixed list of chunks.
+
+    With `hang`, the stream stays open after the chunks run out, the way a real idle SSE
+    connection does, and ends only when `close()` cancels it.
+    """
+
     def __init__(self, status: int = 200, chunks: Iterable[bytes] = (), *, hang: bool = False) -> None:
         self.status = status
         self._chunks = list(chunks)
@@ -26,16 +32,14 @@ class FakeResponse:
         self._released = threading.Event()
         self.closed = False
 
-    def read1(self, amount: int = -1, /) -> bytes:
-        if self.closed:
-            return b""
-        if self._chunks:
-            return self._chunks.pop(0)
-        # An idle connection, behaving like a real socket with a read timeout: the read gives up
-        # periodically so the reader can notice it has been stopped.
-        if self._hang and not self._released.wait(0.02):
-            raise TimeoutError
-        return b""
+    def chunks(self, amount: int) -> Iterator[bytes]:
+        for chunk in self._chunks:
+            if self.closed:
+                return
+            yield chunk
+        # Bounded so a test that forgets to close cannot wedge the suite.
+        if self._hang and not self.closed and not self._released.wait(WAIT_TIMEOUT):
+            raise AssertionError("a hanging FakeResponse was never released")
 
     def close(self) -> None:
         self.closed = True

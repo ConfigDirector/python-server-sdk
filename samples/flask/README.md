@@ -108,8 +108,8 @@ telemetry. A production deployment would also hook its server's worker-exit sign
 The SDK also supports watching configs for changes and subscribing to client events; see the
 [SDK README](../../README.md) for `watch()` and `on()`.
 
-## Stage 1 note
+## Running without a server SDK key
 
-The SDK's evaluation is still stubbed, so every config resolves to the default this app passes
-in. The lifecycle, the API shape, and the code you would write are all real — only the values
-are not.
+Without a valid key the client stays unready and every config falls back to the default this
+app passes in. That is the same path a production app takes when it cannot reach ConfigDirector,
+so it is worth seeing: the app keeps serving, on the defaults you chose.

@@ -4,7 +4,6 @@ import codecs
 import contextlib
 import math
 import threading
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -12,9 +11,9 @@ from typing import Any, TypeVar
 from ..errors import ConfigDirectorTypeError
 from ..logger import get_default_logger
 from ..types import ConfigDirectorLogger
-from .errors import StreamClosedError, StreamStalledError, ValueOutOfRangeError
+from .errors import StreamClosedError, ValueOutOfRangeError
 from .parser import DEFAULT_MAX_EVENT_CHARS, DEFAULT_MAX_LINE_CHARS, EventSourceParser
-from .transport import StreamRequest, open_stream, set_read_timeout
+from .transport import StreamRequest, open_stream
 from .types import EventSourceMessage, ReadyState, ReconnectionState, ResponseStream
 
 __all__ = ["EventSourceClient"]
@@ -26,9 +25,8 @@ _C = TypeVar("_C", bound=Callable[..., Any])
 # small enough that a slow trickle is still delivered promptly.
 _READ_SIZE = 1 << 16
 
-# How long a single read may block before the loop re-checks whether it has been stopped. It
-# also bounds how long close() waits.
-_POLL_INTERVAL = 1.0
+# How long close() waits for the reader to notice the socket has been shut down under it.
+_CLOSE_TIMEOUT = 5.0
 
 _DEFAULT_SERVER_DELAY = 2.0
 _MIN_RECONNECT_DELAY = 0.001
@@ -97,6 +95,8 @@ class EventSourceClient:
         self._stop = threading.Event()
         self._stop.set()
         self._thread: threading.Thread | None = None
+        # The response the reader is currently blocked on, so close() can interrupt it.
+        self._response: ResponseStream | None = None
 
     @property
     def ready_state(self) -> ReadyState:
@@ -117,15 +117,17 @@ class EventSourceClient:
     def close(self) -> None:
         with self._lock:
             self._ready_state = ReadyState.CLOSED
-            stop, thread = self._stop, self._thread
+            stop, thread, response = self._stop, self._thread, self._response
             self._thread = None
 
-        # Only the reader touches the response: closing it from here would block until the read
-        # in flight finished, because that read holds the buffered reader's lock.
         stop.set()
+        # Drops the connection under the reader, so a chunks() call blocked waiting for the next
+        # event gives up instead of holding close() until the server sends something.
+        if response is not None:
+            _close_quietly(response)
         # Joining from the worker itself would deadlock, and close() is reachable from a handler.
         if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=_POLL_INTERVAL * 5)
+            thread.join(timeout=_CLOSE_TIMEOUT)
 
     # -- connection loop --------------------------------------------------------------------
 
@@ -176,6 +178,14 @@ class EventSourceClient:
             if status >= 400:
                 return _Failure(status=status)
 
+            # Published before the first read so close() has something to interrupt.
+            with self._lock:
+                self._response = response
+            if self._stop.is_set():
+                # close() landed in the gap and saw no response to cancel. Reading now would
+                # block on something nothing is going to interrupt.
+                return None
+
             self._begin_stream()
             self._read(response)
         except Exception as error:
@@ -184,6 +194,8 @@ class EventSourceClient:
             self._notify(self.on_error, error)
             return _Failure(status=status, error=error)
         finally:
+            with self._lock:
+                self._response = None
             _close_quietly(response)
 
         if self._stop.is_set():
@@ -201,7 +213,8 @@ class EventSourceClient:
                 method=self._method,
                 headers=headers,
                 body=self._body,
-                timeout=self._connect_timeout,
+                connect_timeout=self._connect_timeout,
+                read_timeout=self._read_timeout,
                 follow_redirects=self._follow_redirects,
             )
         )
@@ -217,12 +230,6 @@ class EventSourceClient:
         self._notify(self.on_connect)
 
     def _read(self, response: ResponseStream) -> None:
-        poll = _POLL_INTERVAL if self._read_timeout is None else min(_POLL_INTERVAL, self._read_timeout)
-        if not set_read_timeout(response, poll):
-            # Reads will block until data arrives, so close() cannot be prompt. Not fatal, but
-            # worth knowing about when a caller supplies their own transport.
-            self._logger.debug("[EventSource] The stream does not support a read timeout")
-
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         parser = EventSourceParser(
             on_event=self._handle_event,
@@ -232,21 +239,10 @@ class EventSourceClient:
             max_event_chars=self._max_event_chars,
         )
 
-        idle_since = time.monotonic()
-        while not self._stop.is_set():
-            try:
-                chunk = response.read1(_READ_SIZE)
-            except TimeoutError:
-                if self._read_timeout is not None and time.monotonic() - idle_since > self._read_timeout:
-                    raise StreamStalledError(f"No data received for {self._read_timeout} seconds") from None
-                continue
-
-            if not chunk:
-                break
+        for chunk in response.chunks(_READ_SIZE):
             if self._stop.is_set():
                 # Whatever arrived alongside close() is not delivered.
                 return
-            idle_since = time.monotonic()
             parser.feed(decoder.decode(chunk))
 
         if self._stop.is_set():

@@ -40,7 +40,7 @@ def test_an_unknown_route_returns_json(http: FlaskClient) -> None:
 
 
 def test_one_client_instance_serves_the_whole_process(http: FlaskClient) -> None:
-    """The client is a singleton: importing it again hands back the same, still-ready object."""
+    """The client is a singleton: importing it again hands back the same, live object."""
     from configdirector_client import client
 
     assert client is app_module.client
@@ -50,5 +50,12 @@ def test_one_client_instance_serves_the_whole_process(http: FlaskClient) -> None
 
     # Requests neither replace the client nor tear it down.
     assert app_module.client is client
-    assert client.is_ready is True
     assert client.closed is False
+
+
+def test_configs_resolve_to_defaults_when_configdirector_is_unreachable(
+    http: FlaskClient,
+) -> None:
+    # conftest.py points the SDK at an address nothing answers on, so this is the offline path.
+    assert app_module.client.is_ready is False
+    assert http.get("/configs").get_json()["temporary-feature-flag"] is True

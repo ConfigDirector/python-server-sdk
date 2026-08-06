@@ -33,8 +33,9 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+from typing import cast
 
-from configdirector import ConfigDirectorClient, Metadata
+from configdirector import ConfigDirectorClient, ConnectionMode, ConnectionOptions, Metadata
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -55,10 +56,21 @@ logger = logging.getLogger(__name__)
 sdk_logger = logging.getLogger("flask_sample.configdirector")
 sdk_logger.setLevel(os.environ.get("CONFIGDIRECTOR_LOG_LEVEL", "INFO"))
 
+# Connection options read from the environment, the way a real deployment would supply them —
+# a proxy URL in one environment, a shorter timeout in another. The defaults here are the SDK's
+# own, so an app that needs none of this can leave `connection` out entirely.
+connection = ConnectionOptions(
+    # Only needed when routing through a proxy to reach ConfigDirector.
+    url=os.environ.get("CONFIGDIRECTOR_BASE_URL") or None,
+    mode=cast(ConnectionMode, os.environ.get("CONFIGDIRECTOR_MODE", "streaming")),
+    timeout=float(os.environ.get("CONFIGDIRECTOR_TIMEOUT", "3")),
+)
+
 # Created once, at import. Constructing the client makes no network calls.
 client = ConfigDirectorClient(
-    os.environ.get("CONFIGDIRECTOR_SERVER_KEY", "demo-server-sdk-key"),
+    os.environ.get("CONFIGDIRECTOR_SERVER_KEY", ""),
     metadata=Metadata(app_name="flask-sample", app_version="1.0.0"),
+    connection=connection,
     logger=sdk_logger,
 )
 

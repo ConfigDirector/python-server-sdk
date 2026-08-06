@@ -8,13 +8,24 @@ import pytest
 from configdirector import (
     ClientHooks,
     ConfigDirectorClient,
+    ConfigDirectorConnectionError,
     ConfigDirectorTypeError,
     ConfigDirectorValidationError,
     ConfigEvaluatedEvent,
     ConfigsUpdatedEvent,
     ConnectionOptions,
     Context,
+    Metadata,
     Subscription,
+)
+
+from helpers import (
+    RecordingLogger,
+    TransportRecorder,
+    bundle,
+    condition,
+    conditional_rule,
+    config,
 )
 
 SDK_KEY = "test-server-sdk-key"
@@ -32,17 +43,26 @@ def ready_client(client: ConfigDirectorClient) -> ConfigDirectorClient:
 
 
 class TestInitialize:
-    def test_marks_the_client_ready(self, client: ConfigDirectorClient) -> None:
+    def test_marks_the_client_ready_once_config_state_arrives(self, client: ConfigDirectorClient) -> None:
         assert client.is_ready is False
 
         client.initialize()
 
         assert client.is_ready is True
 
-    def test_accepts_a_per_call_timeout(self, client: ConfigDirectorClient) -> None:
+    def test_passes_the_timeout_to_the_transport(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
         client.initialize(timeout=0.5)
 
-        assert client.is_ready is True
+        assert transports.last.connect_timeouts == [0.5]
+
+    def test_falls_back_to_the_configured_timeout(self, transports: TransportRecorder) -> None:
+        client = ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(timeout=7.5))
+
+        client.initialize()
+
+        assert transports.last.connect_timeouts == [7.5]
 
     @pytest.mark.parametrize("timeout", [0, -1])
     def test_rejects_a_non_positive_timeout(self, client: ConfigDirectorClient, timeout: float) -> None:
@@ -55,14 +75,59 @@ class TestInitialize:
         with pytest.raises(ConfigDirectorValidationError, match="closed"):
             client.initialize()
 
-    def test_emits_client_ready_and_configs_updated(self, client: ConfigDirectorClient) -> None:
+    def test_emits_configs_updated_before_client_ready(self, client: ConfigDirectorClient) -> None:
         events: list[str] = []
         client.on("client_ready", lambda _event: events.append("client_ready"))
         client.on("configs_updated", lambda _event: events.append("configs_updated"))
 
         client.initialize()
 
-        assert events == ["client_ready", "configs_updated"]
+        assert events == ["configs_updated", "client_ready"]
+
+    def test_stays_unready_when_no_config_state_arrives(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = None
+
+        client.initialize(timeout=0.05)
+
+        assert client.is_ready is False
+
+    def test_warns_when_initialization_times_out(self, transports: TransportRecorder) -> None:
+        transports.initial_bundle = None
+        logger = RecordingLogger()
+        client = ConfigDirectorClient(SDK_KEY, logger=logger)
+
+        client.initialize(timeout=0.05)
+
+        assert any("Timed out waiting for initialization" in m for m in logger.messages("warning"))
+
+    def test_an_unrecoverable_connection_error_is_logged_not_raised(
+        self, transports: TransportRecorder
+    ) -> None:
+        transports.connect_error = ConfigDirectorConnectionError("Unauthorized", 401)
+        logger = RecordingLogger()
+        client = ConfigDirectorClient(SDK_KEY, logger=logger)
+
+        client.initialize()
+
+        assert client.is_ready is False
+        assert any("error occurred during initialization" in m for m in logger.messages("error"))
+
+    def test_sends_the_sdk_identity_and_metadata_to_the_transport(
+        self, transports: TransportRecorder
+    ) -> None:
+        ConfigDirectorClient(SDK_KEY, metadata=Metadata(app_name="checkout", app_version="2.1.0"))
+
+        meta_context = transports.last.options.meta_context
+        assert meta_context["sdkName"] == "python-server-sdk"
+        assert meta_context["appName"] == "checkout"
+        assert meta_context["appVersion"] == "2.1.0"
+
+    def test_omits_metadata_that_was_not_supplied(self, transports: TransportRecorder) -> None:
+        ConfigDirectorClient(SDK_KEY)
+
+        assert set(transports.last.options.meta_context) == {"sdkName", "sdkVersion"}
 
 
 class TestGetValue:
@@ -70,7 +135,7 @@ class TestGetValue:
         "default",
         [True, False, "fallback", 42, 3.14, {"a": 1}, [1, 2, 3]],
     )
-    def test_returns_the_default_for_every_supported_type(
+    def test_returns_the_default_when_the_key_is_unknown(
         self, ready_client: ConfigDirectorClient, default: Any
     ) -> None:
         assert ready_client.get_value("any-key", default) == default
@@ -78,10 +143,84 @@ class TestGetValue:
     def test_returns_the_default_before_initialization(self, client: ConfigDirectorClient) -> None:
         assert client.get_value("any-key", "fallback") == "fallback"
 
-    def test_accepts_a_context(self, ready_client: ConfigDirectorClient) -> None:
-        context = Context(id="user-123", name="Ada", traits={"plan": "pro"}, anonymous=False)
+    def test_returns_the_evaluated_value(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"))
 
-        assert ready_client.get_value("any-key", False, context) is False
+        client.initialize()
+
+        assert client.get_value("greeting", "fallback") == "hello"
+
+    @pytest.mark.parametrize(
+        ("config_type", "stored", "default", "expected"),
+        [
+            ("boolean", "true", False, True),
+            ("boolean", "false", True, False),
+            ("integer", "26", 0, 26),
+            ("float", "3.5", 0.0, 3.5),
+            ("string", "hello", "", "hello"),
+            ("json", '{"a":1}', {}, {"a": 1}),
+            ("json", "[1,2]", [], [1, 2]),
+        ],
+    )
+    def test_coerces_the_value_to_the_type_of_the_default(
+        self,
+        client: ConfigDirectorClient,
+        transports: TransportRecorder,
+        config_type: Any,
+        stored: str,
+        default: Any,
+        expected: Any,
+    ) -> None:
+        transports.initial_bundle = bundle(config("value", stored, type=config_type))
+
+        client.initialize()
+
+        assert client.get_value("value", default) == expected
+
+    def test_falls_back_when_the_value_cannot_be_read_as_the_requested_type(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"))
+        events: list[ConfigEvaluatedEvent] = []
+        client.on("config_evaluated", events.append)
+
+        client.initialize()
+
+        assert client.get_value("greeting", 42) == 42
+        assert events[-1].evaluation.reason == "invalid-number"
+        assert events[-1].evaluation.is_default is True
+
+    def test_applies_targeting_rules_to_the_context(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config(
+                "greeting",
+                "hello",
+                rules=[conditional_rule("bonjour", condition("name", "equals", "Ada"))],
+            )
+        )
+
+        client.initialize()
+
+        assert client.get_value("greeting", "fallback", Context(name="Ada")) == "bonjour"
+        assert client.get_value("greeting", "fallback", Context(name="Bob")) == "hello"
+
+    def test_evaluates_against_the_client_metadata(self, transports: TransportRecorder) -> None:
+        transports.initial_bundle = bundle(
+            config(
+                "greeting",
+                "hello",
+                rules=[conditional_rule("beta", condition("appName", "equals", "checkout"))],
+            )
+        )
+        client = ConfigDirectorClient(SDK_KEY, metadata=Metadata(app_name="checkout"))
+
+        client.initialize()
+
+        assert client.get_value("greeting", "fallback") == "beta"
 
     @pytest.mark.parametrize("config_key", ["", "   "])
     def test_rejects_a_blank_config_key(self, ready_client: ConfigDirectorClient, config_key: str) -> None:
@@ -118,6 +257,19 @@ class TestGetValue:
         assert evaluation.reason == "config-state-missing"
         assert evaluation.context == context
 
+    def test_reports_a_found_match_for_a_known_config(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"))
+        events: list[ConfigEvaluatedEvent] = []
+        client.on("config_evaluated", events.append)
+
+        client.initialize()
+        client.get_value("greeting", "fallback")
+
+        assert events[-1].evaluation.reason == "found-match"
+        assert events[-1].evaluation.is_default is False
+
     def test_reports_client_not_ready_before_initialization(self, client: ConfigDirectorClient) -> None:
         events: list[ConfigEvaluatedEvent] = []
         client.on("config_evaluated", events.append)
@@ -127,21 +279,116 @@ class TestGetValue:
         assert events[0].evaluation.reason == "client-not-ready"
 
 
+class TestConfigUpdates:
+    def test_a_full_bundle_replaces_the_previous_state(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("first", "one"), config("second", "two"))
+        client.initialize()
+
+        transports.last.deliver(bundle(config("third", "three")))
+
+        assert client.get_value("first", "gone") == "gone"
+        assert client.get_value("third", "gone") == "three"
+
+    def test_a_delta_bundle_merges_into_the_previous_state(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("first", "one"))
+        client.initialize()
+
+        transports.last.deliver(bundle(config("second", "two"), kind="delta"))
+
+        assert client.get_value("first", "gone") == "one"
+        assert client.get_value("second", "gone") == "two"
+
+    def test_the_first_delta_bundle_is_taken_as_the_full_state(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("only", "value"), kind="delta")
+
+        client.initialize()
+
+        assert client.is_ready is True
+        assert client.get_value("only", "gone") == "value"
+
+    def test_client_ready_is_emitted_only_once(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        calls: list[str] = []
+        client.on("client_ready", lambda _event: calls.append("ready"))
+
+        client.initialize()
+        transports.last.deliver(bundle(config("later", "value")))
+
+        assert calls == ["ready"]
+
+    def test_configs_updated_reports_the_keys_in_the_update(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        events: list[ConfigsUpdatedEvent] = []
+        client.on("configs_updated", events.append)
+        transports.initial_bundle = bundle(config("b", "1"), config("a", "2"))
+
+        client.initialize()
+
+        assert events[0].keys == ["a", "b"]
+
+    def test_an_update_after_close_is_ignored(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        client.initialize()
+        transport = transports.last
+        client.close()
+
+        transport.deliver(bundle(config("late", "value")))
+
+        assert client.is_ready is False
+
+
 class TestGetAllConfigs:
     def test_returns_nothing_before_initialization(self, client: ConfigDirectorClient) -> None:
         assert client.get_all_configs() == {}
 
-    def test_returns_every_known_config(self, ready_client: ConfigDirectorClient) -> None:
-        configs = ready_client.get_all_configs()
+    def test_returns_every_known_config(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config("greeting", "hello"), config("enabled", "true", type="boolean")
+        )
+        client.initialize()
 
-        assert set(configs) == {"example-boolean-config", "example-string-config"}
-        assert configs["example-boolean-config"].key == "example-boolean-config"
-        assert configs["example-boolean-config"].type == "boolean"
+        configs = client.get_all_configs()
 
-    def test_filters_by_config_keys(self, ready_client: ConfigDirectorClient) -> None:
-        configs = ready_client.get_all_configs(config_keys=["example-string-config", "unknown"])
+        assert set(configs) == {"greeting", "enabled"}
+        assert configs["greeting"].value == "hello"
+        assert configs["enabled"].type == "boolean"
 
-        assert set(configs) == {"example-string-config"}
+    def test_filters_by_config_keys(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"), config("enabled", "true"))
+        client.initialize()
+
+        configs = client.get_all_configs(config_keys=["greeting", "unknown"])
+
+        assert set(configs) == {"greeting"}
+
+    def test_evaluates_against_the_given_context(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config(
+                "greeting",
+                "hello",
+                rules=[conditional_rule("bonjour", condition("name", "equals", "Ada"))],
+            )
+        )
+        client.initialize()
+
+        configs = client.get_all_configs(context=Context(name="Ada"))
+
+        assert configs["greeting"].value == "bonjour"
 
     def test_does_not_emit_evaluation_events(self, ready_client: ConfigDirectorClient) -> None:
         events: list[ConfigEvaluatedEvent] = []
@@ -159,6 +406,76 @@ class TestWatch:
         assert isinstance(subscription, Subscription)
         assert subscription.closed is False
         assert len(_watchers(ready_client, "any-key")) == 1
+
+    def test_fires_when_the_watched_config_is_updated(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        client.initialize()
+        values: list[str] = []
+        client.watch("greeting", "fallback", values.append)
+
+        transports.last.deliver(bundle(config("greeting", "hello")))
+
+        assert values == ["hello"]
+
+    def test_re_evaluates_against_the_watch_context(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        client.initialize()
+        values: list[str] = []
+        client.watch("greeting", "fallback", values.append, Context(name="Ada"))
+
+        transports.last.deliver(
+            bundle(
+                config(
+                    "greeting",
+                    "hello",
+                    rules=[conditional_rule("bonjour", condition("name", "equals", "Ada"))],
+                )
+            )
+        )
+
+        assert values == ["bonjour"]
+
+    def test_does_not_fire_for_a_config_outside_the_update(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        client.initialize()
+        values: list[str] = []
+        client.watch("greeting", "fallback", values.append)
+
+        transports.last.deliver(bundle(config("unrelated", "value"), kind="delta"))
+
+        assert values == []
+
+    def test_a_closed_subscription_stops_receiving_updates(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        client.initialize()
+        values: list[str] = []
+        subscription = client.watch("greeting", "fallback", values.append)
+
+        subscription.close()
+        transports.last.deliver(bundle(config("greeting", "hello")))
+
+        assert values == []
+
+    def test_a_raising_watcher_does_not_stop_the_others(self, transports: TransportRecorder) -> None:
+        logger = RecordingLogger()
+        client = ConfigDirectorClient(SDK_KEY, logger=logger)
+        client.initialize()
+        values: list[str] = []
+
+        def explode(_value: str) -> None:
+            raise RuntimeError("boom")
+
+        client.watch("greeting", "fallback", explode)
+        client.watch("greeting", "fallback", values.append)
+
+        transports.last.deliver(bundle(config("greeting", "hello")))
+
+        assert values == ["hello"]
+        assert any("raised an exception" in message for message in logger.messages("error"))
 
     def test_closing_the_subscription_stops_the_watch(self, ready_client: ConfigDirectorClient) -> None:
         subscription = ready_client.watch("any-key", False, lambda _value: None)
@@ -316,14 +633,15 @@ class TestEvents:
         assert client.is_ready is True
         assert calls == ["second"]
 
-    def test_hooks_receive_events_emitted_during_initialization(self) -> None:
+    def test_hooks_receive_events_emitted_during_initialization(self, transports: TransportRecorder) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"))
         events: list[ConfigsUpdatedEvent] = []
         client = ConfigDirectorClient(SDK_KEY, hooks=ClientHooks(configs_updated=events.append))
 
         client.initialize()
 
         assert len(events) == 1
-        assert events[0].keys == ["example-boolean-config", "example-string-config"]
+        assert events[0].keys == ["greeting"]
 
 
 class TestClose:
@@ -338,6 +656,13 @@ class TestClose:
         assert ready_client.closed is True
         assert _watchers(ready_client, "any-key") == []
         assert calls == []
+
+    def test_closes_the_transport(
+        self, ready_client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        ready_client.close()
+
+        assert transports.last.closed is True
 
     def test_is_idempotent(self, ready_client: ConfigDirectorClient) -> None:
         ready_client.close()
@@ -378,11 +703,17 @@ class TestClose:
 
 class TestConnectionOptions:
     @pytest.mark.parametrize("mode", ["streaming", "polling", "one-time"])
-    def test_supports_every_connection_mode(self, mode: Any) -> None:
+    def test_supports_every_connection_mode(self, mode: Any, transports: TransportRecorder) -> None:
         client = ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode=mode))
         client.initialize()
 
         assert client.is_ready is True
+        assert transports.last.mode == mode
+
+    def test_passes_the_polling_interval_to_the_transport(self, transports: TransportRecorder) -> None:
+        ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=15))
+
+        assert transports.last.options.polling_interval == 15
 
     def test_defaults_match_the_documented_values(self) -> None:
         options = ConnectionOptions()

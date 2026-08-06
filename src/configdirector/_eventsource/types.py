@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
@@ -36,13 +37,16 @@ class ReconnectionState:
 class ResponseStream(Protocol):
     """The subset of a HTTP response the reader needs.
 
-    Matches http.client.HTTPResponse, so urllib responses satisfy it as-is, and a caller can
-    supply requests/httpx with a thin wrapper.
+    `chunks` yields body bytes as they arrive and ends when the stream does. It must raise this
+    SDK's own exception types rather than any belonging to the underlying HTTP library, so that
+    supplying a different transport does not change what the reader has to handle.
     """
 
     @property
     def status(self) -> int: ...
 
-    def read1(self, amount: int = -1, /) -> bytes: ...
+    def chunks(self, amount: int) -> Iterator[bytes]: ...
 
+    # Must be safe to call from another thread while `chunks` is blocked, and must make that
+    # iterator stop rather than waiting for it.
     def close(self) -> None: ...
