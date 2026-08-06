@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from configdirector import Context, Metadata
-from configdirector.evaluation import Condition, ConditionEvaluator, EvaluationContext
+from configdirector._evaluation import Condition, ConditionEvaluator, EvaluationContext
 
 evaluator = ConditionEvaluator()
 

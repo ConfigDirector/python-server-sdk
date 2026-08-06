@@ -11,11 +11,17 @@ from typing import Any, Literal, cast, overload
 from urllib.parse import urlparse
 
 from ._bundle import ConfigBundle
+from ._evaluation import Config, ConfigEvaluator, EvaluationContext
+from ._telemetry import (
+    MAX_EVENT_QUEUE_LIMIT,
+    MIN_EVENT_QUEUE_LIMIT,
+    TelemetryCollector,
+    TelemetryCollectorOptions,
+)
 from ._transport import TransportOptions, create_transport
 from ._value_parser import parse_config_value
 from ._version import SDK_NAME, __version__
 from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
-from .evaluation import Config, ConfigEvaluator, EvaluationContext
 from .logger import get_default_logger
 from .types import (
     ClientEvent,
@@ -78,8 +84,8 @@ class ConfigDirectorClient:
         hooks: Event handlers to attach before the client can emit any event.
 
     Raises:
-        ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, or if
-            ``connection.url`` is not a valid URL.
+        ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
+            ``connection.url`` is not a valid URL, or if a ``telemetry`` setting is out of range.
     """
 
     def __init__(
@@ -104,7 +110,9 @@ class ConfigDirectorClient:
         self._sdk_version = __version__
         self._metadata = metadata if metadata is not None else Metadata()
         self._connection = connection if connection is not None else ConnectionOptions()
-        self._telemetry = telemetry if telemetry is not None else TelemetryOptions()
+        self._telemetry_options = _validated_telemetry(
+            telemetry if telemetry is not None else TelemetryOptions()
+        )
         self._base_url = _validated_url(self._connection.url) or DEFAULT_BASE_URL
 
         self._lock = threading.RLock()
@@ -135,6 +143,18 @@ class ConfigDirectorClient:
             ):
                 if handler is not None:
                     self.on(event, handler)  # type: ignore[call-overload]
+
+        # Built last, and deliberately so: it starts a background flush thread, which would
+        # outlive the client if anything above this line raised.
+        self._telemetry = TelemetryCollector(
+            TelemetryCollectorOptions(
+                server_sdk_key=server_sdk_key,
+                base_url=self._base_url,
+                logger=self._logger,
+                event_queue_limit=self._telemetry_options.event_queue_limit,
+                flush_interval=self._telemetry_options.flush_interval,
+            )
+        )
 
     # -- lifecycle --------------------------------------------------------------------
 
@@ -231,6 +251,7 @@ class ConfigDirectorClient:
 
         self._ready_event.set()  # release anyone still blocked in initialize()
         self._transport.close()
+        self._telemetry.close()  # reports whatever was evaluated since the last flush
         self._logger.debug("close() has been called, the client is now closed")
 
     # -- config state -----------------------------------------------------------------------
@@ -336,6 +357,14 @@ class ConfigDirectorClient:
             self._logger.debug(
                 "No config state found for %r, returning default value %r", config_key, default
             )
+            self._telemetry.record_evaluation(
+                key=config_key,
+                default=default,
+                value=default,
+                used_default=True,
+                reason=reason,
+                context=context,
+            )
             self._emit_evaluation(config_key, default, True, reason, None, context)
             return default
 
@@ -344,6 +373,16 @@ class ConfigDirectorClient:
         )
         result = parse_config_value(state, default)
         self._logger.debug("Evaluated %r to %r", config_key, result.value)
+        self._telemetry.record_evaluation(
+            key=config_key,
+            default=default,
+            value=result.value,
+            used_default=result.used_default,
+            reason=result.reason,
+            context=context,
+            config_type=state.type,
+            value_id=result.value_id,
+        )
         self._emit_evaluation(
             config_key, result.value, result.used_default, result.reason, result.value_id, context
         )
@@ -654,6 +693,21 @@ def _validate_event_name(event: str) -> None:
         raise ConfigDirectorValidationError(
             f"Unknown event '{event}'. Expected one of: {', '.join(sorted(_EVENT_NAMES))}."
         )
+
+
+def _validated_telemetry(options: TelemetryOptions) -> TelemetryOptions:
+    if not MIN_EVENT_QUEUE_LIMIT <= options.event_queue_limit <= MAX_EVENT_QUEUE_LIMIT:
+        raise ConfigDirectorValidationError(
+            f"Invalid telemetry event queue limit '{options.event_queue_limit}'. It must be "
+            f"between {MIN_EVENT_QUEUE_LIMIT} and {MAX_EVENT_QUEUE_LIMIT}."
+        )
+
+    if options.flush_interval <= 0:
+        raise ConfigDirectorValidationError(
+            f"Invalid telemetry flush interval '{options.flush_interval}'. It must be a positive "
+            f"number of seconds."
+        )
+    return options
 
 
 def _validated_url(url: str | None) -> str | None:

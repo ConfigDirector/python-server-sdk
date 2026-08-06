@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from configdirector._bundle import parse_bundle
-from configdirector.evaluation import (
+from configdirector._evaluation import (
     ConditionalRule,
     EnumTypeConstraints,
     NumericTypeConstraints,

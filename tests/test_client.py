@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import contextlib
+import threading
 from typing import Any
 
 import pytest
 
+import configdirector.client
 from configdirector import (
     ClientHooks,
     ConfigDirectorClient,
@@ -17,10 +19,14 @@ from configdirector import (
     Context,
     Metadata,
     Subscription,
+    TelemetryOptions,
 )
+from configdirector._telemetry import TelemetryCollector
 
 from helpers import (
+    RecordedEvaluation,
     RecordingLogger,
+    TelemetryRecorder,
     TransportRecorder,
     bundle,
     condition,
@@ -722,6 +728,129 @@ class TestConnectionOptions:
         assert options.polling_interval == 60.0
         assert options.timeout == 3.0
         assert options.url is None
+
+
+class TestTelemetry:
+    def test_records_every_evaluation(
+        self, client: ConfigDirectorClient, transports: TransportRecorder, telemetry: TelemetryRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"))
+        client.initialize()
+        context = Context(id="user-123")
+
+        client.get_value("greeting", "fallback", context)
+
+        assert telemetry.evaluations == [
+            RecordedEvaluation(
+                key="greeting",
+                default="fallback",
+                value="hello",
+                used_default=False,
+                reason="found-match",
+                context=context,
+                config_type="string",
+                value_id=None,
+            )
+        ]
+
+    def test_records_an_evaluation_that_found_no_config_state(
+        self, ready_client: ConfigDirectorClient, telemetry: TelemetryRecorder
+    ) -> None:
+        ready_client.get_value("unknown-key", "fallback")
+
+        recorded = telemetry.evaluations[0]
+        assert recorded.key == "unknown-key"
+        assert recorded.value == "fallback"
+        assert recorded.used_default is True
+        assert recorded.reason == "config-state-missing"
+        assert recorded.config_type is None
+
+    def test_records_an_evaluation_that_fell_back_to_the_default(
+        self, client: ConfigDirectorClient, transports: TransportRecorder, telemetry: TelemetryRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("threshold", "not-a-number", type="integer"))
+        client.initialize()
+
+        client.get_value("threshold", 10)
+
+        recorded = telemetry.evaluations[0]
+        assert recorded.value == 10
+        assert recorded.used_default is True
+        assert recorded.reason == "invalid-number"
+
+    def test_records_an_evaluation_made_by_a_watcher(
+        self, client: ConfigDirectorClient, transports: TransportRecorder, telemetry: TelemetryRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"))
+        client.initialize()
+        client.watch("greeting", "fallback", lambda _value: None)
+
+        transports.last.deliver(bundle(config("greeting", "bonjour")))
+
+        assert [e.value for e in telemetry.evaluations] == ["bonjour"]
+
+    def test_get_all_configs_does_not_record_anything(
+        self, client: ConfigDirectorClient, transports: TransportRecorder, telemetry: TelemetryRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"))
+        client.initialize()
+
+        client.get_all_configs(context=Context(id="user-123"))
+
+        assert telemetry.evaluations == []
+
+    def test_the_collector_is_built_from_the_client_configuration(self, telemetry: TelemetryRecorder) -> None:
+        ConfigDirectorClient(
+            SDK_KEY,
+            connection=ConnectionOptions(url="https://proxy.example.com"),
+            telemetry=TelemetryOptions(event_queue_limit=250, flush_interval=10.0),
+        )
+
+        options = telemetry.last.options
+        assert options.server_sdk_key == SDK_KEY
+        assert options.base_url == "https://proxy.example.com"
+        assert options.event_queue_limit == 250
+        assert options.flush_interval == 10.0
+
+    def test_closing_the_client_closes_the_collector(
+        self, ready_client: ConfigDirectorClient, telemetry: TelemetryRecorder
+    ) -> None:
+        # This is what reports whatever was evaluated since the last flush.
+        ready_client.close()
+
+        assert telemetry.last.closed is True
+
+    @pytest.mark.parametrize("limit", [0, 99, 100_001])
+    def test_rejects_an_event_queue_limit_outside_the_documented_range(self, limit: int) -> None:
+        with pytest.raises(ConfigDirectorValidationError, match="event queue limit"):
+            ConfigDirectorClient(SDK_KEY, telemetry=TelemetryOptions(event_queue_limit=limit))
+
+    @pytest.mark.parametrize("limit", [100, 5_000, 100_000])
+    def test_accepts_an_event_queue_limit_within_the_documented_range(self, limit: int) -> None:
+        ConfigDirectorClient(SDK_KEY, telemetry=TelemetryOptions(event_queue_limit=limit))
+
+    @pytest.mark.parametrize("interval", [0, -1.0])
+    def test_rejects_a_non_positive_flush_interval(self, interval: float) -> None:
+        with pytest.raises(ConfigDirectorValidationError, match="flush interval"):
+            ConfigDirectorClient(SDK_KEY, telemetry=TelemetryOptions(flush_interval=interval))
+
+    def test_defaults_match_the_documented_values(self) -> None:
+        options = TelemetryOptions()
+
+        assert options.event_queue_limit == 5_000
+        assert options.flush_interval == 30.0
+
+    def test_a_construction_that_fails_leaves_no_flush_thread_behind(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The collector starts a background thread, so it must not be built until nothing else
+        # in the constructor can still raise.
+        monkeypatch.setattr(configdirector.client, "TelemetryCollector", TelemetryCollector)
+
+        with pytest.raises(ConfigDirectorTypeError):
+            ConfigDirectorClient(SDK_KEY, hooks=ClientHooks(client_ready="not callable"))  # type: ignore[arg-type]
+
+        assert not any(t.name == "configdirector-telemetry" for t in threading.enumerate())
 
 
 def _watchers(client: ConfigDirectorClient, config_key: str) -> list[Any]:

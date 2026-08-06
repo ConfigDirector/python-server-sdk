@@ -3,9 +3,8 @@
 This is the Python server SDK for [ConfigDirector](https://www.configdirector.com), a remote
 configuration and feature flag service.
 
-> **Status: pre-release.** Config retrieval and evaluation are implemented. Telemetry
-> reporting is not yet wired up, so the dashboard will not show usage insights for
-> applications running this release.
+> **Status: pre-release.** Config retrieval, evaluation, and telemetry reporting are all
+> implemented. The API may still change before 1.0.
 
 ## Installation
 
@@ -121,6 +120,38 @@ client = ConfigDirectorClient(
 All durations are expressed in **seconds**. Set `url=` only when routing through a proxy to
 reach ConfigDirector.
 
+### Telemetry
+
+The SDK reports which configs your application evaluated back to ConfigDirector. This is what
+powers the usage insights in the dashboard — which configs are in use, what they evaluate to,
+and which users they were evaluated for.
+
+Evaluations are collected in memory and reported on an interval by a background thread, so
+`get_value()` never waits on the network. Identical evaluations are collapsed into a single
+entry with a count, and values too large to send inline are reported by a digest rather than in
+full. Contexts marked `anonymous=True` are used for targeting but never reported.
+
+It is unlikely these settings need adjusting, but if your application performs a large number of
+evaluations per second they let you trade memory footprint against how often telemetry requests
+are made:
+
+```python
+from configdirector import TelemetryOptions
+
+client = ConfigDirectorClient(
+    "YOUR-SERVER-SDK-KEY",
+    telemetry=TelemetryOptions(event_queue_limit=10_000, flush_interval=15),
+)
+```
+
+| Option | Default | Notes |
+|---|---|---|
+| `event_queue_limit` | `5000` | Between 100 and 100,000. Once reached, the oldest events are dropped and the number dropped is reported |
+| `flush_interval` | `30` | **Seconds** between reports |
+
+Calling `close()` reports whatever was collected since the last flush, so shutting the client
+down cleanly is what keeps the tail of a short-lived process from being lost.
+
 ### Logging
 
 The SDK logs through the standard library logger named `configdirector`, so your application
@@ -150,6 +181,10 @@ client = ConfigDirectorClient("YOUR-SERVER-SDK-KEY", logger=create_console_logge
 ```python
 client.close()
 ```
+
+Closing the client closes its connection to ConfigDirector, reports any telemetry collected
+since the last flush, and cancels every event and config key subscription. Safe to call more
+than once.
 
 The client is also a context manager — it initializes on entry and closes on exit:
 

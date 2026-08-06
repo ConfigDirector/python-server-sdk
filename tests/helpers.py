@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from configdirector._bundle import BundleKind, ConfigBundle
-from configdirector._transport import TransportOptions
-from configdirector.evaluation import (
+from configdirector._evaluation import (
     Condition,
     ConditionalRule,
     Config,
@@ -15,7 +15,9 @@ from configdirector.evaluation import (
     Rule,
     TargetingRules,
 )
-from configdirector.types import ConfigType
+from configdirector._telemetry import TelemetryCollectorOptions
+from configdirector._transport import TransportOptions
+from configdirector.types import ConfigType, ConfigValue, Context, EvaluationReason
 
 WAIT_TIMEOUT = 5.0
 
@@ -96,6 +98,76 @@ class TransportRecorder:
     @property
     def last(self) -> FakeTransport:
         return self.created[-1]
+
+
+@dataclass(frozen=True)
+class RecordedEvaluation:
+    key: str
+    default: ConfigValue
+    value: ConfigValue
+    used_default: bool
+    reason: EvaluationReason
+    context: Context | None
+    config_type: ConfigType | None
+    value_id: str | None
+
+
+class FakeTelemetryCollector:
+    """Stands in for the real collector, recording evaluations instead of reporting them."""
+
+    def __init__(self, options: TelemetryCollectorOptions) -> None:
+        self.options = options
+        self.evaluations: list[RecordedEvaluation] = []
+        self.closed = False
+
+    def record_evaluation(
+        self,
+        *,
+        key: str,
+        default: ConfigValue,
+        value: ConfigValue,
+        used_default: bool,
+        reason: EvaluationReason,
+        context: Context | None = None,
+        config_type: ConfigType | None = None,
+        value_id: str | None = None,
+    ) -> None:
+        self.evaluations.append(
+            RecordedEvaluation(
+                key=key,
+                default=default,
+                value=value,
+                used_default=used_default,
+                reason=reason,
+                context=context,
+                config_type=config_type,
+                value_id=value_id,
+            )
+        )
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class TelemetryRecorder:
+    def __init__(self) -> None:
+        self.created: list[FakeTelemetryCollector] = []
+
+    def __call__(self, options: TelemetryCollectorOptions) -> FakeTelemetryCollector:
+        collector = FakeTelemetryCollector(options)
+        self.created.append(collector)
+        return collector
+
+    @property
+    def last(self) -> FakeTelemetryCollector:
+        return self.created[-1]
+
+    @property
+    def evaluations(self) -> list[RecordedEvaluation]:
+        return self.last.evaluations
 
 
 def bundle(*configs: Config, kind: BundleKind = "full", timestamp: str | None = None) -> ConfigBundle:

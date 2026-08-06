@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from configdirector.evaluation import assign_percentage
+from configdirector._evaluation import assign_percentage
 
 
 class TestAssignPercentage:

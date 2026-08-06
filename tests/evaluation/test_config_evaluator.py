@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from configdirector import Context, Metadata
-from configdirector.evaluation import (
+from configdirector._evaluation import (
     Condition,
     ConditionalRule,
     Config,

@@ -4,8 +4,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
-from .evaluation._json_value import to_json_string
-from .evaluation.types import (
+from ._evaluation._json_value import to_json_string
+from ._evaluation.types import (
     Condition,
     ConditionalRule,
     Config,

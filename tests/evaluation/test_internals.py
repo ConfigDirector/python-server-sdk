@@ -5,9 +5,9 @@ from typing import Any
 
 import pytest
 
-from configdirector.evaluation._json_pointer import find_by_pointer
-from configdirector.evaluation._json_value import to_json_string
-from configdirector.evaluation.date_comparison import compare_date
+from configdirector._evaluation._json_pointer import find_by_pointer
+from configdirector._evaluation._json_value import to_json_string
+from configdirector._evaluation.date_comparison import compare_date
 
 
 class TestJsonPointer:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from configdirector.evaluation._rapidhash import rapidhash
+from configdirector._evaluation._rapidhash import rapidhash
 
 SEED = 0x397832987
 
