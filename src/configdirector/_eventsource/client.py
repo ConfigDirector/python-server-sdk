@@ -1,0 +1,329 @@
+from __future__ import annotations
+
+import codecs
+import contextlib
+import math
+import threading
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, TypeVar
+
+from ..errors import ConfigDirectorTypeError
+from ..logger import get_default_logger
+from ..types import ConfigDirectorLogger
+from .errors import StreamClosedError, StreamStalledError, ValueOutOfRangeError
+from .parser import DEFAULT_MAX_EVENT_CHARS, DEFAULT_MAX_LINE_CHARS, EventSourceParser
+from .transport import StreamRequest, open_stream, set_read_timeout
+from .types import EventSourceMessage, ReadyState, ReconnectionState, ResponseStream
+
+__all__ = ["EventSourceClient"]
+
+_T = TypeVar("_T")
+_C = TypeVar("_C", bound=Callable[..., Any])
+
+# Bytes taken from the socket per read. Large enough that a burst of events costs few syscalls,
+# small enough that a slow trickle is still delivered promptly.
+_READ_SIZE = 1 << 16
+
+# How long a single read may block before the loop re-checks whether it has been stopped. It
+# also bounds how long close() waits.
+_POLL_INTERVAL = 1.0
+
+_DEFAULT_SERVER_DELAY = 2.0
+_MIN_RECONNECT_DELAY = 0.001
+_MAX_RECONNECT_DELAY = 3600.0
+
+
+@dataclass(frozen=True, slots=True)
+class _Failure:
+    status: int | None = None
+    error: BaseException | None = None
+
+
+class EventSourceClient:
+    def __init__(
+        self,
+        url: str,
+        *,
+        method: str = "GET",
+        headers: Mapping[str, str] | None = None,
+        body: bytes | None = None,
+        last_event_id: str | None = None,
+        connect_timeout: float | None = 10.0,
+        read_timeout: float | None = None,
+        follow_redirects: bool = True,
+        transport: Callable[[StreamRequest], ResponseStream] = open_stream,
+        logger: ConfigDirectorLogger | None = None,
+        on_connect: Callable[[], None] | None = None,
+        on_disconnect: Callable[[], None] | None = None,
+        on_message: Callable[[EventSourceMessage], None] | None = None,
+        on_comment: Callable[[str], None] | None = None,
+        on_error: Callable[[BaseException], None] | None = None,
+        should_reconnect: Callable[[ReconnectionState], bool] | None = None,
+        calculate_reconnect_delay: Callable[[ReconnectionState], float] | None = None,
+        max_line_chars: int = DEFAULT_MAX_LINE_CHARS,
+        max_event_chars: int = DEFAULT_MAX_EVENT_CHARS,
+    ) -> None:
+        self._url = url
+        self._method = method
+        self._body = body
+        # The caller's headers may override Accept, but not by accident.
+        self._headers = {"Accept": "text/event-stream", **(headers or {})}
+        self._last_event_id = last_event_id
+        self._connect_timeout = connect_timeout
+        self._read_timeout = read_timeout
+        self._follow_redirects = follow_redirects
+        self._transport = transport
+        self._logger = logger if logger is not None else get_default_logger()
+        self._max_line_chars = max_line_chars
+        self._max_event_chars = max_event_chars
+
+        self.on_connect = _checked(on_connect, "on_connect")
+        self.on_disconnect = _checked(on_disconnect, "on_disconnect")
+        self.on_message = _checked(on_message, "on_message")
+        self.on_comment = _checked(on_comment, "on_comment")
+        self.on_error = _checked(on_error, "on_error")
+        self.should_reconnect = _checked(should_reconnect, "should_reconnect")
+        self.calculate_reconnect_delay = _checked(calculate_reconnect_delay, "calculate_reconnect_delay")
+
+        # Guards the compound parts of connect() and close() against each other. Everything
+        # else is a single attribute read or write, and _stop is what says whether the worker
+        # should still be running.
+        self._lock = threading.Lock()
+        self._ready_state = ReadyState.CLOSED
+        self._attempt = 0
+        self._server_delay = _DEFAULT_SERVER_DELAY
+        self._stop = threading.Event()
+        self._stop.set()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def ready_state(self) -> ReadyState:
+        return self._ready_state
+
+    # -- lifecycle --------------------------------------------------------------------------
+
+    def connect(self) -> None:
+        with self._lock:
+            if self._ready_state is not ReadyState.CLOSED:
+                return
+            self._ready_state = ReadyState.CONNECTING
+            self._attempt = 0
+            self._stop = threading.Event()
+            self._thread = threading.Thread(target=self._run, name="configdirector-eventsource", daemon=True)
+            self._thread.start()
+
+    def close(self) -> None:
+        with self._lock:
+            self._ready_state = ReadyState.CLOSED
+            stop, thread = self._stop, self._thread
+            self._thread = None
+
+        # Only the reader touches the response: closing it from here would block until the read
+        # in flight finished, because that read holds the buffered reader's lock.
+        stop.set()
+        # Joining from the worker itself would deadlock, and close() is reachable from a handler.
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=_POLL_INTERVAL * 5)
+
+    # -- connection loop --------------------------------------------------------------------
+
+    def _set_state(self, state: ReadyState) -> None:
+        # A worker that has been stopped must not resurrect the state it was closed out of.
+        if not self._stop.is_set():
+            self._ready_state = state
+
+    def _run(self) -> None:
+        try:
+            while True:
+                failure = self._connect_once()
+                if failure is None or self._stop.is_set():
+                    return
+
+                self._attempt += 1
+                state = ReconnectionState(
+                    attempt=self._attempt,
+                    server_reconnect_delay=self._server_delay,
+                    status=failure.status,
+                    error=failure.error,
+                )
+                if not self._ask(self.should_reconnect, state, default=True):
+                    self._disconnected()
+                    return
+
+                self._set_state(ReadyState.CONNECTING)
+                if self._stop.wait(self._reconnect_delay(state)):
+                    return
+        except BaseException as error:  # the worker must not die without saying why
+            self._logger.error("[EventSource] The connection loop stopped unexpectedly: %r", error)
+            self._ready_state = ReadyState.CLOSED
+
+    def _connect_once(self) -> _Failure | None:
+        try:
+            response = self._open()
+        except Exception as error:
+            if self._stop.is_set():
+                return None
+            self._notify(self.on_error, error)
+            return _Failure(error=error)
+
+        status = response.status
+        try:
+            if status == 204:
+                self._disconnected()
+                return None
+            if status >= 400:
+                return _Failure(status=status)
+
+            self._begin_stream()
+            self._read(response)
+        except Exception as error:
+            if self._stop.is_set():
+                return None
+            self._notify(self.on_error, error)
+            return _Failure(status=status, error=error)
+        finally:
+            _close_quietly(response)
+
+        if self._stop.is_set():
+            return None
+        return _Failure(status=status, error=StreamClosedError("The response stream was closed"))
+
+    def _open(self) -> ResponseStream:
+        headers = dict(self._headers)
+        if self._last_event_id is not None:
+            headers["Last-Event-ID"] = self._last_event_id
+
+        response = self._transport(
+            StreamRequest(
+                url=self._url,
+                method=self._method,
+                headers=headers,
+                body=self._body,
+                timeout=self._connect_timeout,
+                follow_redirects=self._follow_redirects,
+            )
+        )
+        if self._stop.is_set():
+            # close() landed while the request was in flight.
+            _close_quietly(response)
+            raise StreamClosedError("The client was closed while connecting")
+        return response
+
+    def _begin_stream(self) -> None:
+        self._set_state(ReadyState.OPEN)
+        self._attempt = 0
+        self._notify(self.on_connect)
+
+    def _read(self, response: ResponseStream) -> None:
+        poll = _POLL_INTERVAL if self._read_timeout is None else min(_POLL_INTERVAL, self._read_timeout)
+        if not set_read_timeout(response, poll):
+            # Reads will block until data arrives, so close() cannot be prompt. Not fatal, but
+            # worth knowing about when a caller supplies their own transport.
+            self._logger.debug("[EventSource] The stream does not support a read timeout")
+
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        parser = EventSourceParser(
+            on_event=self._handle_event,
+            on_comment=lambda comment: self._notify(self.on_comment, comment),
+            on_retry=self._handle_retry,
+            max_line_chars=self._max_line_chars,
+            max_event_chars=self._max_event_chars,
+        )
+
+        idle_since = time.monotonic()
+        while not self._stop.is_set():
+            try:
+                chunk = response.read1(_READ_SIZE)
+            except TimeoutError:
+                if self._read_timeout is not None and time.monotonic() - idle_since > self._read_timeout:
+                    raise StreamStalledError(f"No data received for {self._read_timeout} seconds") from None
+                continue
+
+            if not chunk:
+                break
+            if self._stop.is_set():
+                # Whatever arrived alongside close() is not delivered.
+                return
+            idle_since = time.monotonic()
+            parser.feed(decoder.decode(chunk))
+
+        if self._stop.is_set():
+            return
+        parser.feed(decoder.decode(b"", True))
+        parser.finish()
+
+    def _handle_event(self, message: EventSourceMessage) -> None:
+        if message.id is not None:
+            self._last_event_id = message.id
+        self._notify(self.on_message, message)
+
+    def _handle_retry(self, milliseconds: int) -> None:
+        # The SSE field is milliseconds; every duration this SDK exposes is seconds.
+        self._server_delay = milliseconds / 1000.0
+
+    def _disconnected(self) -> None:
+        self._ready_state = ReadyState.CLOSED
+        self._stop.set()
+        self._notify(self.on_disconnect)
+
+    def _reconnect_delay(self, state: ReconnectionState) -> float:
+        delay = _as_seconds(self._ask(self.calculate_reconnect_delay, state, default=self._server_delay))
+        if delay is None or not _MIN_RECONNECT_DELAY <= delay <= _MAX_RECONNECT_DELAY:
+            self._notify(
+                self.on_error,
+                ValueOutOfRangeError(
+                    f"The calculated reconnect delay {delay} is out of range; "
+                    f"falling back to {self._server_delay} seconds"
+                ),
+            )
+            return self._server_delay
+        return delay
+
+    # -- callback plumbing ------------------------------------------------------------------
+
+    def _notify(self, callback: Callable[..., Any] | None, *args: Any) -> None:
+        if callback is None:
+            return
+        try:
+            callback(*args)
+        except Exception as error:
+            # A caller's handler must not take the connection down with it.
+            self._logger.error("[EventSource] A %s handler raised: %r", _name(callback), error)
+
+    def _ask(self, callback: Callable[..., _T] | None, state: ReconnectionState, *, default: _T) -> _T:
+        if callback is None:
+            return default
+        try:
+            return callback(state)
+        except Exception as error:
+            self._logger.error(
+                "[EventSource] A %s handler raised, using %r: %r", _name(callback), default, error
+            )
+            return default
+
+
+def _checked(callback: _C | None, name: str) -> _C | None:
+    if callback is not None and not callable(callback):
+        raise ConfigDirectorTypeError(f"{name} must be callable")
+    return callback
+
+
+def _as_seconds(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    seconds = float(value)
+    return seconds if math.isfinite(seconds) else None
+
+
+def _close_quietly(response: ResponseStream | None) -> None:
+    if response is None:
+        return
+    # Already broken; there is nothing useful left to do about a failure here.
+    with contextlib.suppress(Exception):
+        response.close()
+
+
+def _name(callback: Callable[..., Any]) -> str:
+    return getattr(callback, "__name__", type(callback).__name__)
