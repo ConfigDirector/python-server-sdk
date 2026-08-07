@@ -4,7 +4,7 @@ import http.server
 import threading
 import time
 from collections.abc import Callable, Iterator
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from urllib3.response import BaseHTTPResponse
@@ -14,6 +14,8 @@ from configdirector._eventsource import (
     EventSourceMessage,
     ReadyState,
     ReconnectionState,
+    StreamRequest,
+    open_stream,
 )
 from configdirector._eventsource.transport import _Stream
 
@@ -148,6 +150,46 @@ def test_close_interrupts_a_read_that_is_already_blocked(
     assert client.ready_state is ReadyState.CLOSED
     # Without closing the response, this would block until the server let go.
     assert elapsed < 2.0
+
+
+def test_cancel_closes_the_socket_under_the_reader(serve: Callable[[Handler], _Server]) -> None:
+    # cancel() has to drop the socket itself, because shutdown() only stops *subsequent* receives
+    # on Windows and leaves a reader parked in recv(). Asserted directly on the socket rather than
+    # through close() timing: on POSIX shutdown() covers for a broken close, so the gap is
+    # invisible here and only surfaces as a hung close() on Windows CI.
+    release = threading.Event()
+
+    def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+        send_headers(request)
+        request.wfile.write(b"data: hello\n\n")
+        request.wfile.flush()
+        release.wait(10)
+
+    server = serve(handle)
+    stream = open_stream(
+        StreamRequest(
+            url=server.url,
+            method="GET",
+            headers={},
+            body=None,
+            connect_timeout=5,
+            read_timeout=None,
+            follow_redirects=True,
+        )
+    )
+    try:
+        assert next(stream.chunks(1 << 16)) == b"data: hello\n\n"
+        # Reached by this test's own traversal, so that a wrong lookup in the transport fails
+        # here instead of quietly agreeing with it.
+        sock = cast(Any, stream)._response._fp.fp.raw._sock
+        assert sock.fileno() != -1
+
+        stream.cancel()
+
+        assert sock.fileno() == -1
+    finally:
+        release.set()
+        stream.close()
 
 
 def test_a_server_error_status_is_reported_without_an_error(
@@ -299,9 +341,23 @@ class TestStreamCancel:
             # makefile(), so reaching it instead of _real_close() would cancel nothing.
             self._calls.append("socket.close")
 
+    class _SocketIO:
+        def __init__(self, calls: list[str]) -> None:
+            self._sock = TestStreamCancel._Socket(calls)
+
+    class _BufferedReader:
+        def __init__(self, calls: list[str]) -> None:
+            self.raw = TestStreamCancel._SocketIO(calls)
+
+    class _HttpClientResponse:
+        def __init__(self, calls: list[str]) -> None:
+            self.fp = TestStreamCancel._BufferedReader(calls)
+
     class _Connection:
         def __init__(self, calls: list[str]) -> None:
-            self.sock = TestStreamCancel._Socket(calls)
+            # None, as urllib3 leaves it: the socket has been handed to the response, so this
+            # route is a dead end and only the file object below reaches the live socket.
+            self.sock = None
             self._calls = calls
 
         def close(self) -> None:
@@ -314,6 +370,7 @@ class TestStreamCancel:
             self._calls = calls
             self._shutdown_error = shutdown_error
             self._connection = TestStreamCancel._Connection(calls)
+            self._fp = TestStreamCancel._HttpClientResponse(calls)
 
         def shutdown(self) -> None:
             self._calls.append("shutdown")

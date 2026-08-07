@@ -98,15 +98,29 @@ def _close_socket(response: BaseHTTPResponse) -> None:
     holds the socket through `makefile()`, which pins `_io_refs` above zero, and `socket.close()`
     only flags the socket and defers the real close to whoever drops the last file object -- the
     buffered reader, whose teardown is exactly what is blocked. `_real_close()` is the unguarded
-    form. Both it and urllib3's `_connection` are private, so every step is optional: if any of
-    them moves, this degrades to shutdown()-only rather than raising out of cancel().
+    form, and it is private, so this stays optional: if it moves, this degrades to
+    shutdown()-only rather than raising out of cancel().
     """
-    sock = getattr(getattr(response, "_connection", None), "sock", None)
-    real_close = getattr(sock, "_real_close", None)
+    real_close = getattr(_socket_of(response), "_real_close", None)
     if real_close is None:
         return
     with contextlib.suppress(Exception):
         real_close()
+
+
+def _socket_of(response: BaseHTTPResponse) -> object | None:
+    """The live socket behind a streaming response, or None if it cannot be reached.
+
+    Not `response._connection.sock`: urllib3 hands the socket to the response and leaves the
+    connection's own reference set to None, so that route is always a dead end. The socket is
+    reachable only through the response's file object, as
+    ``http.client response -> BufferedReader -> SocketIO -> socket``.
+
+    Every step is private to urllib3, http.client, or socket, which is why this returns None
+    instead of raising when one of them moves.
+    """
+    buffered = getattr(getattr(response, "_fp", None), "fp", None)
+    return getattr(getattr(buffered, "raw", None), "_sock", None)
 
 
 def open_stream(request: StreamRequest) -> ResponseStream:
