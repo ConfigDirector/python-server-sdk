@@ -21,7 +21,7 @@ from ._telemetry import (
 )
 from ._transport import TransportOptions, create_transport
 from ._value_parser import parse_config_value
-from ._version import SDK_NAME, __version__
+from ._version import _SDK_NAME, __version__
 from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
 from .types import (
     ClientEvent,
@@ -45,7 +45,7 @@ from .types import (
 
 __all__ = ["ConfigDirectorClient", "create_client"]
 
-DEFAULT_BASE_URL = "https://server-sdk-api.configdirector.com"
+_DEFAULT_BASE_URL = "https://server-sdk-api.configdirector.com"
 
 _EVENT_NAMES: frozenset[str] = frozenset({"client_ready", "configs_updated", "config_evaluated"})
 
@@ -112,14 +112,14 @@ class ConfigDirectorClient:
             )
 
         self._server_sdk_key = server_sdk_key
-        self._sdk_name = SDK_NAME
+        self._sdk_name = _SDK_NAME
         self._sdk_version = __version__
         self._metadata = metadata if metadata is not None else Metadata()
         self._connection = connection if connection is not None else ConnectionOptions()
         self._telemetry_options = _validated_telemetry(
             telemetry if telemetry is not None else TelemetryOptions()
         )
-        self._base_url = _validated_url(self._connection.url) or DEFAULT_BASE_URL
+        self._base_url = _validated_url(self._connection.url) or _DEFAULT_BASE_URL
 
         self._lock = threading.RLock()
         self._ready = False

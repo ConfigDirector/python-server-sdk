@@ -11,14 +11,17 @@ __all__ = [
     "ClientEvent",
     "ClientHooks",
     "ClientReadyEvent",
+    "ClientReadyHandler",
     "ConfigDirectorLogger",
     "ConfigEvaluatedEvent",
+    "ConfigEvaluatedHandler",
     "ConfigEvaluation",
     "ConfigState",
     "ConfigType",
     "ConfigValue",
     "ConfigValueT",
     "ConfigsUpdatedEvent",
+    "ConfigsUpdatedHandler",
     "ConnectionMode",
     "ConnectionOptions",
     "Context",
@@ -235,8 +238,13 @@ WatchHandler = Callable[[ConfigValueT], None]
 """A callback invoked with the new value whenever a watched config changes."""
 
 ClientReadyHandler = Callable[[ClientReadyEvent], None]
+"""A handler for the ``client_ready`` event."""
+
 ConfigsUpdatedHandler = Callable[[ConfigsUpdatedEvent], None]
+"""A handler for the ``configs_updated`` event."""
+
 ConfigEvaluatedHandler = Callable[[ConfigEvaluatedEvent], None]
+"""A handler for the ``config_evaluated`` event."""
 
 
 class Subscription:

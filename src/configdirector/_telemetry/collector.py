@@ -26,7 +26,7 @@ MIN_EVENT_QUEUE_LIMIT = 100
 MAX_EVENT_QUEUE_LIMIT = 100_000
 
 # The first flush comes early so that a process that runs briefly still reports what it evaluated.
-INITIAL_FLUSH_DELAY = 5.0
+_INITIAL_FLUSH_DELAY = 5.0
 
 # How long close() waits for a report already in flight to return.
 _JOIN_TIMEOUT = 5.0
@@ -43,7 +43,7 @@ class TelemetryCollectorOptions:
     logger: ConfigDirectorLogger
     event_queue_limit: int = DEFAULT_EVENT_QUEUE_LIMIT
     flush_interval: float = DEFAULT_FLUSH_INTERVAL
-    initial_flush_delay: float = INITIAL_FLUSH_DELAY
+    initial_flush_delay: float = _INITIAL_FLUSH_DELAY
     # Supplied by tests; in production the collector builds its own HTTP reporter.
     reporter: EventReporter | None = field(default=None, compare=False)
 

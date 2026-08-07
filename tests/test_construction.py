@@ -15,7 +15,7 @@ from configdirector import (
     __version__,
     create_client,
 )
-from configdirector.client import DEFAULT_BASE_URL
+from configdirector.client import _DEFAULT_BASE_URL
 
 SDK_KEY = "test-server-sdk-key"
 
@@ -76,7 +76,7 @@ def test_validation_errors_are_also_value_errors() -> None:
 
 
 def test_defaults_to_the_production_url() -> None:
-    assert ConfigDirectorClient(SDK_KEY)._base_url == DEFAULT_BASE_URL
+    assert ConfigDirectorClient(SDK_KEY)._base_url == _DEFAULT_BASE_URL
 
 
 def test_accepts_a_custom_url() -> None:

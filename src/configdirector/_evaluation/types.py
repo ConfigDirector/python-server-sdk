@@ -20,6 +20,7 @@ __all__ = [
     "Percentage",
     "PercentageRule",
     "Rule",
+    "RuleValue",
     "Target",
     "TargetType",
     "TargetingRules",

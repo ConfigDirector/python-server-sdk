@@ -7,7 +7,7 @@ from typing import Any, Protocol
 from urllib.parse import urljoin
 
 from .._bundle import ConfigBundle
-from .._version import SDK_NAME, __version__
+from .._version import _SDK_NAME, __version__
 from ..errors import ConfigDirectorConnectionError
 from ..types import ConfigDirectorLogger
 
@@ -24,9 +24,9 @@ __all__ = [
 # Every request identifies the SDK by name and version. Left to itself urllib sends
 # "Python-urllib/3.x", which bot-protection layers in front of the API reject before the request
 # ever reaches the origin — surfacing as a 403 that looks exactly like a rejected SDK key.
-USER_AGENT = f"{SDK_NAME}/{__version__}"
+_USER_AGENT = f"{_SDK_NAME}/{__version__}"
 
-REQUEST_HEADERS = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
+REQUEST_HEADERS = {"Content-Type": "application/json", "User-Agent": _USER_AGENT}
 
 
 @dataclass(frozen=True, slots=True)
