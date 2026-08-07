@@ -9,7 +9,7 @@ from urllib3.response import BaseHTTPResponse
 
 from .errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 
-__all__ = ["MAX_RESPONSE_BYTES", "HttpResponse", "post"]
+__all__ = ["MAX_RESPONSE_BYTES", "HttpClient", "HttpResponse"]
 
 # Caps how much of a response body is held in memory. A config bundle is orders of magnitude
 # smaller than this; anything larger is a misconfigured proxy or a hostile endpoint, and a
@@ -17,10 +17,9 @@ __all__ = ["MAX_RESPONSE_BYTES", "HttpResponse", "post"]
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 
 # Reconnection and polling cadence are the transport's job. urllib3 must not retry underneath
-# it, or one logical poll would become several.
-_NO_RETRIES = False
-
-_pool = urllib3.PoolManager()
+# it, or one logical poll would become several. False is urllib3's "no retries, and do not raise
+# on a bad status either" — not a count, which is what the streaming transport passes instead.
+_RETRIES_DISABLED = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,31 +32,47 @@ class HttpResponse:
         return 200 <= self.status < 300
 
 
-def post(url: str, body: bytes, headers: Mapping[str, str], timeout: float) -> HttpResponse:
-    try:
-        response = _pool.request(
-            "POST",
-            url,
-            body=body,
-            headers=dict(headers),
-            timeout=urllib3.Timeout(connect=timeout, read=timeout),
-            retries=_NO_RETRIES,
-            # The body is read below against a size cap rather than loaded whole.
-            preload_content=False,
-        )
-    except LocationValueError as error:
-        # The URL itself is unusable, so every retry would fail identically.
-        raise ConfigDirectorValidationError(f"The URL '{url}' is not usable: {error}") from error
-    except HTTPError as error:
-        # Refused, unresolved, timed out. All worth retrying.
-        raise ConfigDirectorConnectionError(f"Connection failed with error: {error}.") from error
+class HttpClient:
+    """Owns the connection pool behind one client's request/response calls.
 
-    # An error response is still a response: the caller reads the status and the body to decide
-    # whether the failure is worth retrying.
-    try:
-        return HttpResponse(status=response.status, body=_read_text(response))
-    finally:
-        response.release_conn()
+    Per client rather than per process: the connections a client opened have to be released when
+    that client closes, and two clients must not share a pool either of them can close underneath
+    the other. Kept separate from the streaming pool because their lifetimes differ — a stream
+    holds its connection for as long as it stays open, where these cycle once per request.
+    """
+
+    def __init__(self) -> None:
+        self._pool = urllib3.PoolManager()
+
+    def post(self, url: str, body: bytes, headers: Mapping[str, str], timeout: float) -> HttpResponse:
+        try:
+            response = self._pool.request(
+                "POST",
+                url,
+                body=body,
+                headers=dict(headers),
+                timeout=urllib3.Timeout(connect=timeout, read=timeout),
+                retries=_RETRIES_DISABLED,
+                # The body is read below against a size cap rather than loaded whole.
+                preload_content=False,
+            )
+        except LocationValueError as error:
+            # The URL itself is unusable, so every retry would fail identically.
+            raise ConfigDirectorValidationError(f"The URL '{url}' is not usable: {error}") from error
+        except HTTPError as error:
+            # Refused, unresolved, timed out. All worth retrying.
+            raise ConfigDirectorConnectionError(f"Connection failed with error: {error}.") from error
+
+        # An error response is still a response: the caller reads the status and the body to
+        # decide whether the failure is worth retrying.
+        try:
+            return HttpResponse(status=response.status, body=_read_text(response))
+        finally:
+            response.release_conn()
+
+    def close(self) -> None:
+        """Releases pooled connections. A request already in flight is its caller's to finish."""
+        self._pool.clear()
 
 
 def _read_text(response: BaseHTTPResponse) -> str:

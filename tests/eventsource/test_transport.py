@@ -14,8 +14,8 @@ from configdirector._eventsource import (
     EventSourceMessage,
     ReadyState,
     ReconnectionState,
+    StreamOpener,
     StreamRequest,
-    open_stream,
 )
 from configdirector._eventsource.transport import _Stream
 
@@ -166,7 +166,7 @@ def test_cancel_closes_the_socket_under_the_reader(serve: Callable[[Handler], _S
         release.wait(10)
 
     server = serve(handle)
-    stream = open_stream(
+    stream = StreamOpener()(
         StreamRequest(
             url=server.url,
             method="GET",

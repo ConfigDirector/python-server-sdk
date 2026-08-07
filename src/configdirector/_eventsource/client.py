@@ -12,7 +12,7 @@ from ..errors import ConfigDirectorTypeError
 from ..types import ConfigDirectorLogger
 from .errors import StreamClosedError, ValueOutOfRangeError
 from .parser import DEFAULT_MAX_EVENT_CHARS, DEFAULT_MAX_LINE_CHARS, EventSourceParser
-from .transport import StreamRequest, open_stream
+from .transport import StreamOpener, StreamRequest
 from .types import EventSourceMessage, ReadyState, ReconnectionState, ResponseStream
 
 __all__ = ["EventSourceClient"]
@@ -50,7 +50,7 @@ class EventSourceClient:
         connect_timeout: float | None = 10.0,
         read_timeout: float | None = None,
         follow_redirects: bool = True,
-        transport: Callable[[StreamRequest], ResponseStream] = open_stream,
+        transport: Callable[[StreamRequest], ResponseStream] | None = None,
         logger: ConfigDirectorLogger,
         on_connect: Callable[[], None] | None = None,
         on_disconnect: Callable[[], None] | None = None,
@@ -71,6 +71,12 @@ class EventSourceClient:
         self._connect_timeout = connect_timeout
         self._read_timeout = read_timeout
         self._follow_redirects = follow_redirects
+        # Only owned when the caller did not bring its own transport, and only then is it this
+        # client's to close: a supplied one belongs to whoever supplied it.
+        self._opener: StreamOpener | None = None
+        if transport is None:
+            self._opener = StreamOpener()
+            transport = self._opener
         self._transport = transport
         self._logger = logger
         self._max_line_chars = max_line_chars
@@ -131,6 +137,9 @@ class EventSourceClient:
         # Joining from the worker itself would deadlock, and close() is reachable from a handler.
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=_CLOSE_TIMEOUT)
+        # Last, so the reader has unwound off the connection before its pool is released.
+        if self._opener is not None:
+            self._opener.close()
 
     # -- connection loop --------------------------------------------------------------------
 

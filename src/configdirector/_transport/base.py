@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Protocol
 from urllib.parse import urljoin
 
 from .._bundle import ConfigBundle
+from .._http import HttpClient
 from .._version import _SDK_NAME, __version__
 from ..errors import ConfigDirectorConnectionError
 from ..types import ConfigDirectorLogger
@@ -26,7 +28,11 @@ __all__ = [
 # ever reaches the origin — surfacing as a 403 that looks exactly like a rejected SDK key.
 _USER_AGENT = f"{_SDK_NAME}/{__version__}"
 
-REQUEST_HEADERS = {"Content-Type": "application/json", "User-Agent": _USER_AGENT}
+# A read-only view, because one dict is shared by every request the SDK makes: editing it in
+# place would silently change the headers of the transport and the telemetry reporter alike.
+REQUEST_HEADERS: Mapping[str, str] = MappingProxyType(
+    {"Content-Type": "application/json", "User-Agent": _USER_AGENT}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +42,8 @@ class TransportOptions:
     meta_context: Mapping[str, str]
     logger: ConfigDirectorLogger
     on_bundle: Callable[[ConfigBundle], None]
+    # Owned by the client, and shared with the telemetry reporter: both talk to the same host.
+    http: HttpClient = field(default_factory=HttpClient)
     polling_interval: float = 60.0
 
 

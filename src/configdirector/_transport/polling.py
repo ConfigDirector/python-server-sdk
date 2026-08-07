@@ -4,8 +4,8 @@ import threading
 from dataclasses import replace
 from typing import NoReturn
 
-from .. import _http
 from .._bundle import parse_bundle
+from .._http import HttpResponse
 from ..errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 from .base import (
     REQUEST_HEADERS,
@@ -43,7 +43,7 @@ class PollingTransport:
             # A transient failure on the first fetch must not leave the SDK without a
             # connection, so polling starts either way. An unrecoverable one has already closed
             # the transport and must not be retried.
-            if not self._fatal:
+            if not self._has_failed_fatally():
                 self._start_polling(timeout)
 
     @property
@@ -85,11 +85,11 @@ class PollingTransport:
             except Exception as error:  # the polling thread must not die without saying why
                 self._logger.error("[PollingTransport] Polling stopped unexpectedly: %r", error)
                 return
-            if self._fatal:
+            if self._has_failed_fatally():
                 return
 
     def _fetch(self, timeout: float) -> None:
-        if self._fatal:
+        if self._has_failed_fatally():
             self._logger.warning(
                 "[PollingTransport] There was a prior unrecoverable error. Ignoring attempt to reconnect."
             )
@@ -115,21 +115,24 @@ class PollingTransport:
             ) from error
 
         if bundle.timestamp is not None:
-            self._last_update_timestamp = bundle.timestamp
+            with self._lock:
+                self._last_update_timestamp = bundle.timestamp
         self._options.on_bundle(bundle)
 
-    def _post(self, timeout: float) -> _http.HttpResponse:
+    def _post(self, timeout: float) -> HttpResponse:
+        with self._lock:
+            last_update_timestamp = self._last_update_timestamp
         body = json_body(
             {
                 "serverSdkKey": self._options.server_sdk_key,
                 "metaContext": self._options.meta_context,
-                "lastUpdateTimestamp": self._last_update_timestamp,
+                "lastUpdateTimestamp": last_update_timestamp,
             }
         )
         try:
             # Network-level failures — refused, unresolved, timed out — arrive as
             # ConfigDirectorConnectionError and are left to propagate: all are worth retrying.
-            return _http.post(self._url, body, REQUEST_HEADERS, timeout)
+            return self._options.http.post(self._url, body, REQUEST_HEADERS, timeout)
         except ConfigDirectorValidationError as error:
             # The URL itself is unusable, so every retry would fail identically.
             self._fail_fatally(
@@ -139,8 +142,14 @@ class PollingTransport:
                 )
             )
 
+    def _has_failed_fatally(self) -> bool:
+        with self._lock:
+            return self._fatal
+
     def _fail_fatally(self, error: ConfigDirectorConnectionError) -> NoReturn:
-        self._fatal = True
+        with self._lock:
+            self._fatal = True
+        # Deliberately outside the lock: close() takes it too, and this Lock is not reentrant.
         self.close()
         raise error
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
+from .._http import HttpClient
 from ..types import ConfigDirectorLogger, ConfigType, ConfigValue, Context, EvaluationReason
 from .events import EvaluatedConfigEvent
 from .queue import ContextRegistry, EventQueue, aggregate
@@ -41,6 +42,8 @@ class TelemetryCollectorOptions:
     server_sdk_key: str
     base_url: str
     logger: ConfigDirectorLogger
+    # Owned by the client and shared with the transport. Unused when `reporter` is supplied.
+    http: HttpClient = field(default_factory=HttpClient)
     event_queue_limit: int = DEFAULT_EVENT_QUEUE_LIMIT
     flush_interval: float = DEFAULT_FLUSH_INTERVAL
     initial_flush_delay: float = _INITIAL_FLUSH_DELAY
@@ -57,6 +60,7 @@ class TelemetryCollector:
             server_sdk_key=options.server_sdk_key,
             base_url=options.base_url,
             logger=options.logger,
+            http=options.http,
         )
 
         limit = options.event_queue_limit

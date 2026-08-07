@@ -670,6 +670,20 @@ class TestClose:
 
         assert transports.last.closed is True
 
+    def test_each_client_owns_its_connection_pool(self) -> None:
+        # A pool shared across clients would let one client's close() drop connections another
+        # is still using.
+        assert ConfigDirectorClient(SDK_KEY)._http is not ConfigDirectorClient(SDK_KEY)._http
+
+    def test_close_releases_the_connection_pool(self, ready_client: ConfigDirectorClient) -> None:
+        pool = ready_client._http._pool
+        pool.connection_from_url("http://127.0.0.1:1")
+        assert len(pool.pools) == 1
+
+        ready_client.close()
+
+        assert len(pool.pools) == 0
+
     def test_is_idempotent(self, ready_client: ConfigDirectorClient) -> None:
         ready_client.close()
         ready_client.close()

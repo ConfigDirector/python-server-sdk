@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from ._bundle import ConfigBundle
 from ._evaluation import Config, ConfigEvaluator, EvaluationContext
+from ._http import HttpClient
 from ._logger import get_default_logger
 from ._telemetry import (
     MAX_EVENT_QUEUE_LIMIT,
@@ -121,6 +122,10 @@ class ConfigDirectorClient:
         )
         self._base_url = _validated_url(self._connection.url) or _DEFAULT_BASE_URL
 
+        # One pool for every request/response call this client makes — polling and telemetry
+        # both. Owned here so that close() releases the connections it opened, rather than
+        # leaving them in a pool shared by every client in the process.
+        self._http = HttpClient()
         self._lock = threading.RLock()
         self._ready = False
         self._closed = False
@@ -137,6 +142,7 @@ class ConfigDirectorClient:
                 meta_context=_meta_context(self._metadata, self._sdk_name, self._sdk_version),
                 logger=self._logger,
                 on_bundle=self._on_bundle,
+                http=self._http,
                 polling_interval=self._connection.polling_interval,
             ),
         )
@@ -157,6 +163,7 @@ class ConfigDirectorClient:
                 server_sdk_key=server_sdk_key,
                 base_url=self._base_url,
                 logger=self._logger,
+                http=self._http,
                 event_queue_limit=self._telemetry_options.event_queue_limit,
                 flush_interval=self._telemetry_options.flush_interval,
             )
@@ -258,6 +265,9 @@ class ConfigDirectorClient:
         self._ready_event.set()  # release anyone still blocked in initialize()
         self._transport.close()
         self._telemetry.close()  # reports whatever was evaluated since the last flush
+        # Last: the final telemetry report above is the client's last request, and it needs the
+        # pool still open to send it.
+        self._http.close()
         self._logger.debug("close() has been called, the client is now closed")
 
     # -- config state -----------------------------------------------------------------------

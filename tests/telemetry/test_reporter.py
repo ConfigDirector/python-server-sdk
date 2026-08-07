@@ -5,11 +5,12 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from configdirector import _http
+from configdirector._http import HttpClient
 from configdirector._telemetry import reporter as reporter_module
 from configdirector._telemetry.events import EvaluatedConfigEvent
 from configdirector._telemetry.queue import AggregatedEvent
@@ -44,9 +45,7 @@ class StubHttp:
         self.status = 204
         self.error: BaseException | None = None
 
-    def __call__(
-        self, url: str, body: bytes, headers: Mapping[str, str], timeout: float
-    ) -> _http.HttpResponse:
+    def post(self, url: str, body: bytes, headers: Mapping[str, str], timeout: float) -> _http.HttpResponse:
         self.calls.append(Call(url=url, body=body, headers=headers, timeout=timeout))
         if self.error is not None:
             raise self.error
@@ -58,11 +57,9 @@ class StubHttp:
 
 
 @pytest.fixture
-def http(monkeypatch: pytest.MonkeyPatch) -> StubHttp:
-    stub = StubHttp()
-    # The reporter calls _http.post through the module, so patching it there is what it sees.
-    monkeypatch.setattr(_http, "post", stub)
-    return stub
+def http() -> StubHttp:
+    # Injected as the reporter's HttpClient, so nothing has to be patched into place.
+    return StubHttp()
 
 
 @pytest.fixture
@@ -71,8 +68,10 @@ def logger() -> RecordingLogger:
 
 
 @pytest.fixture
-def reporter(logger: RecordingLogger) -> HttpEventReporter:
-    return HttpEventReporter(server_sdk_key="sdk-key", base_url=BASE_URL, logger=logger)
+def reporter(logger: RecordingLogger, http: StubHttp) -> HttpEventReporter:
+    return HttpEventReporter(
+        server_sdk_key="sdk-key", base_url=BASE_URL, logger=logger, http=cast(HttpClient, http)
+    )
 
 
 def event(key: str = "my-config", context_id: str | None = None) -> EvaluatedConfigEvent:
@@ -109,7 +108,10 @@ class TestRequest:
 
     def test_keeps_the_path_of_a_proxy_base_url(self, logger: RecordingLogger, http: StubHttp) -> None:
         proxied = HttpEventReporter(
-            server_sdk_key="sdk-key", base_url="https://proxy.example.com/configdirector", logger=logger
+            server_sdk_key="sdk-key",
+            base_url="https://proxy.example.com/configdirector",
+            logger=logger,
+            http=cast(HttpClient, http),
         )
 
         proxied.report(report(event()))

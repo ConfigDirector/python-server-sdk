@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from .. import _http
+from .._http import HttpClient
 from .._transport.base import REQUEST_HEADERS, is_fatal_status, resolve
 from ..errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 from ..types import ConfigDirectorLogger, Context
@@ -61,9 +61,11 @@ class HttpEventReporter:
         server_sdk_key: str,
         base_url: str,
         logger: ConfigDirectorLogger,
+        http: HttpClient,
         timeout: float = REQUEST_TIMEOUT,
     ) -> None:
         self._server_sdk_key = server_sdk_key
+        self._http = http
         self._url = resolve(base_url, _PATH)
         self._logger = logger
         self._timeout = timeout
@@ -97,7 +99,7 @@ class HttpEventReporter:
 
     def _send(self, body: bytes) -> ReporterResponse:
         try:
-            response = _http.post(self._url, body, REQUEST_HEADERS, self._timeout)
+            response = self._http.post(self._url, body, REQUEST_HEADERS, self._timeout)
         except ConfigDirectorValidationError as error:
             # The URL itself is unusable, so every retry would fail identically.
             self._logger.warning(

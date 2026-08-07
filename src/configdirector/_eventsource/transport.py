@@ -11,11 +11,11 @@ from urllib3.response import BaseHTTPResponse
 from .errors import StreamClosedError, StreamStalledError
 from .types import ResponseStream
 
-__all__ = ["StreamRequest", "open_stream"]
+__all__ = ["StreamOpener", "StreamRequest"]
 
 # Reconnection, including its backoff, belongs to EventSourceClient. urllib3 must not quietly
 # retry underneath it, or a single logical attempt would become several.
-_NO_RETRIES = 0
+_NO_ATTEMPTS = 0
 
 # Only relevant when the caller opted into redirects; urllib3 needs a bound either way.
 _MAX_REDIRECTS = 5
@@ -34,9 +34,6 @@ class StreamRequest:
     # which is what a stream fed by server-sent keepalives wants.
     read_timeout: float | None
     follow_redirects: bool
-
-
-_pool = urllib3.PoolManager()
 
 
 class _Stream:
@@ -123,28 +120,43 @@ def _socket_of(response: BaseHTTPResponse) -> object | None:
     return getattr(getattr(buffered, "raw", None), "_sock", None)
 
 
-def open_stream(request: StreamRequest) -> ResponseStream:
-    response = _pool.request(
-        request.method,
-        request.url,
-        body=request.body,
-        headers=dict(request.headers),
-        timeout=urllib3.Timeout(connect=request.connect_timeout, read=request.read_timeout),
-        # The reader consumes the body incrementally; preloading it would block until the
-        # server closed the stream, which for SSE is never.
-        preload_content=False,
-        redirect=request.follow_redirects,
-        retries=urllib3.Retry(
-            total=None,
-            connect=_NO_RETRIES,
-            read=_NO_RETRIES,
-            status=_NO_RETRIES,
-            other=_NO_RETRIES,
-            redirect=_MAX_REDIRECTS if request.follow_redirects else _NO_RETRIES,
-            # An error response is still a response: the reader inspects the status and decides
-            # whether to reconnect, exactly as it would for a 2xx.
-            raise_on_status=False,
-            raise_on_redirect=False,
-        ),
-    )
-    return _Stream(response)
+class StreamOpener:
+    """Opens streams on a connection pool it owns.
+
+    Callable, so it drops straight into `EventSourceClient`'s transport seam alongside the fakes
+    a test supplies. Owning the pool is what lets a closed client take its connections with it,
+    rather than leaving them in a pool shared by every client in the process.
+    """
+
+    def __init__(self) -> None:
+        self._pool = urllib3.PoolManager()
+
+    def __call__(self, request: StreamRequest) -> ResponseStream:
+        response = self._pool.request(
+            request.method,
+            request.url,
+            body=request.body,
+            headers=dict(request.headers),
+            timeout=urllib3.Timeout(connect=request.connect_timeout, read=request.read_timeout),
+            # The reader consumes the body incrementally; preloading it would block until the
+            # server closed the stream, which for SSE is never.
+            preload_content=False,
+            redirect=request.follow_redirects,
+            retries=urllib3.Retry(
+                total=None,
+                connect=_NO_ATTEMPTS,
+                read=_NO_ATTEMPTS,
+                status=_NO_ATTEMPTS,
+                other=_NO_ATTEMPTS,
+                redirect=_MAX_REDIRECTS if request.follow_redirects else _NO_ATTEMPTS,
+                # An error response is still a response: the reader inspects the status and
+                # decides whether to reconnect, exactly as it would for a 2xx.
+                raise_on_status=False,
+                raise_on_redirect=False,
+            ),
+        )
+        return _Stream(response)
+
+    def close(self) -> None:
+        """Releases pooled connections. The open stream is the reader's to unwind."""
+        self._pool.clear()
