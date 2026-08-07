@@ -207,12 +207,15 @@ def config(
     type: ConfigType = "string",
     rules: Sequence[Rule] = (),
     id: str | None = None,
+    default_value_id: str | None = None,
 ) -> Config:
     return Config(
         id=id or f"cfg_{key}",
         key=key,
         type=type,
-        target=TargetingRules(default_value=default_value, rules=list(rules)),
+        target=TargetingRules(
+            default_value=default_value, rules=list(rules), default_value_id=default_value_id
+        ),
     )
 
 
@@ -221,8 +224,9 @@ def conditional_rule(
     *conditions: Condition,
     order: int = 0,
     id: str = "rule-1",
+    value_id: str | None = None,
 ) -> ConditionalRule:
-    return ConditionalRule(id=id, order=order, value=value, conditions=list(conditions))
+    return ConditionalRule(id=id, order=order, value=value, conditions=list(conditions), value_id=value_id)
 
 
 def percentage_rule(*percentages: Percentage, order: int = 0, id: str = "rule-1") -> PercentageRule:

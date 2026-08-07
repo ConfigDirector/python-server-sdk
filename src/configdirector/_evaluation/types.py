@@ -66,6 +66,7 @@ class Percentage:
     id: str
     percentage: float
     value: RuleValue = None
+    value_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +78,7 @@ class ConditionalRule:
     percentages: list[Percentage] = field(default_factory=list)
     target: str = "value"
     type: str = "conditional"
+    value_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +97,7 @@ Rule = ConditionalRule | PercentageRule
 class TargetingRules:
     default_value: str
     rules: list[Rule] = field(default_factory=list)
+    default_value_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

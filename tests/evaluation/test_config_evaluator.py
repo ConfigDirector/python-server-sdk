@@ -626,3 +626,95 @@ class TestRuleOrderingWithMissingOrderValues:
         )
 
         assert evaluator.evaluate(config, ctx(id="10")).value == "second-rule"
+
+
+class TestValueIds:
+    """Each value the server can select carries the ID the server gave it."""
+
+    def test_the_targeting_default_value_carries_its_id(self) -> None:
+        config = Config(
+            id=CONFIG_ID,
+            key="greeting",
+            type="string",
+            target=TargetingRules(default_value="hello", default_value_id="id-default", rules=[]),
+        )
+
+        state = evaluator.evaluate(config)
+
+        assert state.value == "hello"
+        assert state.value_id == "id-default"
+
+    def test_a_matched_conditional_rule_carries_its_id(self) -> None:
+        config = Config(
+            id=CONFIG_ID,
+            key="greeting",
+            type="string",
+            target=TargetingRules(
+                default_value="hello",
+                default_value_id="id-default",
+                rules=[
+                    ConditionalRule(
+                        id=uid(),
+                        order=0,
+                        value="bonjour",
+                        value_id="id-rule",
+                        conditions=[identifier_is("user-1")],
+                    )
+                ],
+            ),
+        )
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.value == "bonjour"
+        assert state.value_id == "id-rule"
+
+    def test_a_matched_percentage_bucket_carries_its_id(self) -> None:
+        config = Config(
+            id=CONFIG_ID,
+            key="greeting",
+            type="string",
+            target=TargetingRules(
+                default_value="hello",
+                default_value_id="id-default",
+                rules=[
+                    PercentageRule(
+                        id=uid(),
+                        order=0,
+                        percentages=[
+                            Percentage(id=uid(), percentage=100.0, value="rolled", value_id="id-bucket")
+                        ],
+                    )
+                ],
+            ),
+        )
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.value == "rolled"
+        assert state.value_id == "id-bucket"
+
+    def test_an_unmatched_rule_falls_back_to_the_default_value_id(self) -> None:
+        config = Config(
+            id=CONFIG_ID,
+            key="greeting",
+            type="string",
+            target=TargetingRules(
+                default_value="hello",
+                default_value_id="id-default",
+                rules=[
+                    ConditionalRule(
+                        id=uid(),
+                        order=0,
+                        value="bonjour",
+                        value_id="id-rule",
+                        conditions=[identifier_is("someone-else")],
+                    )
+                ],
+            ),
+        )
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.value == "hello"
+        assert state.value_id == "id-default"

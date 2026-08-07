@@ -270,3 +270,81 @@ class TestRuleParsing:
 
         assert isinstance(rule, ConditionalRule)
         assert rule.value == '{"a":1}'
+
+
+class TestValueIds:
+    def test_reads_the_targeting_default_value_id(self, logger: RecordingLogger) -> None:
+        result = parse_bundle(wire_bundle(wire_config()), logger)
+
+        assert result.configs["greeting"].target.default_value_id == "value-id-1"
+
+    def test_reads_a_conditional_rules_value_id(self, logger: RecordingLogger) -> None:
+        payload = wire_bundle(
+            wire_config(
+                target={
+                    "defaultValue": "hello",
+                    "defaultValueId": "value-id-1",
+                    "rules": [
+                        {
+                            "id": "rule-1",
+                            "type": "conditional",
+                            "order": 0,
+                            "target": "value",
+                            "value": "bonjour",
+                            "valueId": "value-id-2",
+                            "conditions": [],
+                        }
+                    ],
+                }
+            )
+        )
+
+        rule = parse_bundle(payload, logger).configs["greeting"].target.rules[0]
+
+        assert isinstance(rule, ConditionalRule)
+        assert rule.value_id == "value-id-2"
+
+    def test_reads_a_percentage_buckets_value_id(self, logger: RecordingLogger) -> None:
+        payload = wire_bundle(
+            wire_config(
+                target={
+                    "defaultValue": "hello",
+                    "defaultValueId": "value-id-1",
+                    "rules": [
+                        {
+                            "id": "rule-1",
+                            "type": "percentage",
+                            "order": 0,
+                            "target": "percentage",
+                            "percentages": [
+                                {"id": "p-1", "percentage": 100, "value": "a", "valueId": "value-id-3"}
+                            ],
+                        }
+                    ],
+                }
+            )
+        )
+
+        rule = parse_bundle(payload, logger).configs["greeting"].target.rules[0]
+
+        assert isinstance(rule, PercentageRule)
+        assert rule.percentages[0].value_id == "value-id-3"
+
+    def test_a_missing_value_id_stays_none(self, logger: RecordingLogger) -> None:
+        payload = wire_bundle(
+            wire_config(
+                target={
+                    "defaultValue": "hello",
+                    "rules": [
+                        {"id": "rule-1", "type": "conditional", "order": 0, "value": "x", "conditions": []}
+                    ],
+                }
+            )
+        )
+
+        config = parse_bundle(payload, logger).configs["greeting"]
+        rule = config.target.rules[0]
+
+        assert isinstance(rule, ConditionalRule)
+        assert rule.value_id is None
+        assert config.target.default_value_id is None

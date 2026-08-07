@@ -12,7 +12,9 @@ __all__ = [
     "CONFIG_VALUE_MAX_LENGTH",
     "EvaluatedConfigEvent",
     "TelemetryValue",
+    "render_value",
     "requested_type_of",
+    "value_id_for",
 ]
 
 # Values longer than this are reported by ID rather than inline, to keep telemetry payloads small.
@@ -44,14 +46,9 @@ class TelemetryValue:
         if _is_json(value, config_type):
             if value_id is not None:
                 return cls(value_id=value_id, type="json")
-            try:
-                return cls(value=to_compact_json(value), type="json")
-            except TypeError:
-                # A default the caller built out of something JSON cannot represent is still
-                # worth counting, so fall back to however the value describes itself.
-                return cls(value=str(value), type="json")
+            return cls(value=render_value(value, config_type), type="json")
 
-        rendered = to_json_string(value)
+        rendered = render_value(value, config_type)
         if len(rendered) <= CONFIG_VALUE_MAX_LENGTH:
             return cls(value=rendered)
         return cls(value_id=value_id) if value_id is not None else cls(value=rendered)
@@ -136,6 +133,21 @@ class EvaluatedConfigEvent:
         wire["usedDefault"] = self.used_default
         wire["evaluationReason"] = self.evaluation_reason
         return wire
+
+
+def render_value(value: ConfigValue, config_type: ConfigType | None = None) -> str:
+    if _is_json(value, config_type):
+        try:
+            return to_compact_json(value)
+        except TypeError:
+            # A default the caller built out of something JSON cannot represent is still worth
+            # counting, so fall back to however the value describes itself.
+            return str(value)
+    return to_json_string(value)
+
+
+def value_id_for(value: ConfigValue, config_type: ConfigType | None = None) -> str:
+    return generate_value_id(render_value(value, config_type))
 
 
 def _is_json(value: ConfigValue, config_type: ConfigType | None) -> bool:

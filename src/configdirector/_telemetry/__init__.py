@@ -9,7 +9,14 @@ from .collector import (
     TelemetryCollectorOptions,
 )
 from .compact_json import to_compact_json
-from .events import CONFIG_VALUE_MAX_LENGTH, EvaluatedConfigEvent, TelemetryValue, requested_type_of
+from .events import (
+    CONFIG_VALUE_MAX_LENGTH,
+    EvaluatedConfigEvent,
+    TelemetryValue,
+    render_value,
+    requested_type_of,
+    value_id_for,
+)
 from .queue import AggregatedEvent, ContextRegistry, EventQueue, EventQueueSnapshot, aggregate
 from .reporter import EventReport, EventReporter, HttpEventReporter, ReporterResponse
 from .value_id import VALUE_ID_LENGTH, generate_value_id
@@ -35,6 +42,8 @@ __all__ = [
     "TelemetryValue",
     "aggregate",
     "generate_value_id",
+    "render_value",
     "requested_type_of",
     "to_compact_json",
+    "value_id_for",
 ]

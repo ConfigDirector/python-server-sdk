@@ -22,6 +22,7 @@ from configdirector import (
     TelemetryOptions,
 )
 from configdirector._telemetry import TelemetryCollector
+from configdirector._telemetry.value_id import VALUE_ID_LENGTH, generate_value_id
 from tests.helpers import (
     RecordedEvaluation,
     RecordingLogger,
@@ -747,7 +748,7 @@ class TestTelemetry:
     def test_records_every_evaluation(
         self, client: ConfigDirectorClient, transports: TransportRecorder, telemetry: TelemetryRecorder
     ) -> None:
-        transports.initial_bundle = bundle(config("greeting", "hello"))
+        transports.initial_bundle = bundle(config("greeting", "hello", default_value_id="id-1"))
         client.initialize()
         context = Context(id="user-123")
 
@@ -762,7 +763,7 @@ class TestTelemetry:
                 reason="found-match",
                 context=context,
                 config_type="string",
-                value_id=None,
+                value_id="id-1",
             )
         ]
 
@@ -868,3 +869,71 @@ class TestTelemetry:
 
 def _watchers(client: ConfigDirectorClient, config_key: str) -> list[Any]:
     return client._watchers.get(config_key, [])
+
+
+class TestValueIds:
+    """Server-selected values carry the server's ID; a default from code gets one computed."""
+
+    def _evaluations(self, client: ConfigDirectorClient) -> list[ConfigEvaluatedEvent]:
+        events: list[ConfigEvaluatedEvent] = []
+        client.on("config_evaluated", events.append)
+        return events
+
+    def test_a_server_selected_value_carries_the_server_id(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello", default_value_id="id-from-server"))
+        client.initialize()
+        events = self._evaluations(client)
+
+        assert client.get_value("greeting", "fallback") == "hello"
+        assert events[-1].evaluation.value_id == "id-from-server"
+
+    def test_a_missing_config_gets_a_computed_id(self, ready_client: ConfigDirectorClient) -> None:
+        events = self._evaluations(ready_client)
+
+        ready_client.get_value("unknown-key", "fallback")
+
+        value_id = events[-1].evaluation.value_id
+        assert value_id == generate_value_id("fallback")
+        assert len(value_id or "") == VALUE_ID_LENGTH
+
+    def test_a_default_used_after_a_type_mismatch_gets_a_computed_id(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(config("greeting", "hello"))
+        client.initialize()
+        events = self._evaluations(client)
+
+        assert client.get_value("greeting", 42) == 42
+        assert events[-1].evaluation.is_default is True
+        assert events[-1].evaluation.value_id == generate_value_id("42")
+
+    def test_a_json_default_is_digested_the_way_telemetry_reports_it(
+        self, ready_client: ConfigDirectorClient
+    ) -> None:
+        # The same document must not be counted under two IDs depending on which side hashed it.
+        events = self._evaluations(ready_client)
+
+        ready_client.get_value("unknown-key", {"b": 2, "a": [1, True, None]})
+
+        assert events[-1].evaluation.value_id == generate_value_id('{"b":2,"a":[1,true,null]}')
+
+    def test_the_computed_id_reaches_telemetry(
+        self, ready_client: ConfigDirectorClient, telemetry: TelemetryRecorder
+    ) -> None:
+        ready_client.get_value("unknown-key", "fallback")
+
+        assert telemetry.evaluations[-1].value_id == generate_value_id("fallback")
+
+    def test_a_value_the_server_did_not_identify_gets_a_computed_id(
+        self, client: ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        # The server IDs everything it sends, so this only arises on a payload that predates
+        # value IDs. The ID is derived from the value actually returned, not from the default.
+        transports.initial_bundle = bundle(config("greeting", "hello"))
+        client.initialize()
+        events = self._evaluations(client)
+
+        assert client.get_value("greeting", "fallback") == "hello"
+        assert events[-1].evaluation.value_id == generate_value_id("hello")

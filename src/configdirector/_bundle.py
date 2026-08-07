@@ -74,6 +74,7 @@ def _parse_config(raw: Any) -> Config:
         target=TargetingRules(
             default_value=_as_string(target.get("defaultValue")),
             rules=[_parse_rule(rule) for rule in target.get("rules") or []],
+            default_value_id=_optional_string(target.get("defaultValueId")),
         ),
         variations=[_parse_variation(variation) for variation in raw.get("variations") or []],
         type_constraints=_parse_type_constraints(raw.get("typeConstraints")),
@@ -102,6 +103,7 @@ def _parse_rule(raw: Any) -> Rule:
         percentages=percentages,
         target=str(raw.get("target") or "value"),
         type=str(kind) if kind is not None else "conditional",
+        value_id=_optional_string(raw.get("valueId")),
     )
 
 
@@ -121,6 +123,7 @@ def _parse_percentage(raw: Any) -> Percentage:
         id=str(raw["id"]),
         percentage=float(raw["percentage"]),
         value=_rule_value(raw.get("value")),
+        value_id=_optional_string(raw.get("valueId")),
     )
 
 

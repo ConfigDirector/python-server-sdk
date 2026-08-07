@@ -19,6 +19,7 @@ from ._telemetry import (
     MIN_EVENT_QUEUE_LIMIT,
     TelemetryCollector,
     TelemetryCollectorOptions,
+    value_id_for,
 )
 from ._transport import TransportOptions, create_transport
 from ._value_parser import parse_config_value
@@ -373,6 +374,7 @@ class ConfigDirectorClient:
             self._logger.debug(
                 "No config state found for %r, returning default value %r", config_key, default
             )
+            value_id: str | None = value_id_for(default)
             self._telemetry.record_evaluation(
                 key=config_key,
                 default=default,
@@ -380,14 +382,16 @@ class ConfigDirectorClient:
                 used_default=True,
                 reason=reason,
                 context=context,
+                value_id=value_id,
             )
-            self._emit_evaluation(config_key, default, True, reason, None, context)
+            self._emit_evaluation(config_key, default, True, reason, value_id, context)
             return default
 
         state = self._evaluator.evaluate(
             definition, EvaluationContext(context=context, metadata=self._metadata)
         )
         result = parse_config_value(state, default)
+        value_id = result.value_id or value_id_for(result.value, state.type)
         self._logger.debug("Evaluated %r to %r", config_key, result.value)
         self._telemetry.record_evaluation(
             key=config_key,
@@ -397,11 +401,9 @@ class ConfigDirectorClient:
             reason=result.reason,
             context=context,
             config_type=state.type,
-            value_id=result.value_id,
+            value_id=value_id,
         )
-        self._emit_evaluation(
-            config_key, result.value, result.used_default, result.reason, result.value_id, context
-        )
+        self._emit_evaluation(config_key, result.value, result.used_default, result.reason, value_id, context)
         return cast(ConfigValueT, result.value)
 
     def _emit_evaluation(

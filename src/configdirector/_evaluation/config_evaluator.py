@@ -26,6 +26,7 @@ _LAST = float("inf")
 class _RuleResult:
     matched: bool
     value: str = ""
+    value_id: str | None = None
 
 
 _NO_MATCH = _RuleResult(matched=False)
@@ -36,14 +37,20 @@ class ConfigEvaluator:
         self._logger = logger
 
     def evaluate(self, config: Config, context: EvaluationContext | None = None) -> ConfigState:
+        value, value_id = self._get_config_value(config, context)
         return ConfigState(
             id=config.id,
             key=config.key,
             type=config.type,
-            value=self._get_config_value(config, context),
+            value=value,
+            value_id=value_id,
         )
 
-    def _get_config_value(self, config: Config, context: EvaluationContext | None) -> str | None:
+    # Returns the selected value together with the server's ID for it. The two travel as a pair
+    # because which rule produced the value is the only thing that says which ID belongs to it.
+    def _get_config_value(
+        self, config: Config, context: EvaluationContext | None
+    ) -> tuple[str | None, str | None]:
         rules = sorted(
             config.target.rules,
             key=lambda rule: _LAST if rule.order is None else rule.order,
@@ -51,9 +58,9 @@ class ConfigEvaluator:
         for rule in rules:
             result = self._evaluate_rule(rule, config, context)
             if result.matched:
-                return result.value
+                return result.value, result.value_id
 
-        return config.target.default_value
+        return config.target.default_value, config.target.default_value_id
 
     def _evaluate_rule(self, rule: Rule, config: Config, context: EvaluationContext | None) -> _RuleResult:
         try:
@@ -98,7 +105,7 @@ class ConfigEvaluator:
             total += percentage.percentage
 
         if bucket is not None and bucket.value is not None:
-            return _RuleResult(matched=True, value=to_json_string(bucket.value))
+            return _RuleResult(matched=True, value=to_json_string(bucket.value), value_id=bucket.value_id)
         return _NO_MATCH
 
     def _evaluate_conditional_rule(
@@ -110,7 +117,7 @@ class ConfigEvaluator:
         if not any(evaluate_condition(condition, context) for condition in rule.conditions or []):
             return _NO_MATCH
         if rule.target == "value" and rule.value is not None:
-            return _RuleResult(matched=True, value=to_json_string(rule.value))
+            return _RuleResult(matched=True, value=to_json_string(rule.value), value_id=rule.value_id)
         if rule.target == "percentage":
             return self._evaluate_percentage(rule.percentages, config, context)
         return _NO_MATCH
