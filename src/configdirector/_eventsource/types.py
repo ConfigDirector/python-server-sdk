@@ -47,6 +47,12 @@ class ResponseStream(Protocol):
 
     def chunks(self, amount: int) -> Iterator[bytes]: ...
 
-    # Must be safe to call from another thread while `chunks` is blocked, and must make that
-    # iterator stop rather than waiting for it.
+    # Ends a `chunks` iterator that is blocked waiting for the next event, from another thread.
+    # It must not wait for that iterator, and it must not touch any state the blocked reader
+    # holds: a reader parked on a socket owns the buffered reader's lock until it returns, so
+    # anything that tears the response down here would deadlock the caller instead of the read.
+    # Releasing the response is the reader's job, once `chunks` has unwound.
+    def cancel(self) -> None: ...
+
+    # Releases the response. Only the thread that drove `chunks` may call this.
     def close(self) -> None: ...

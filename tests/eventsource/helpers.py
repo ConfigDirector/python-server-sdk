@@ -22,7 +22,7 @@ class FakeResponse:
     """A `ResponseStream` whose body is a fixed list of chunks.
 
     With `hang`, the stream stays open after the chunks run out, the way a real idle SSE
-    connection does, and ends only when `close()` cancels it.
+    connection does, and ends only when `cancel()` or `close()` ends it.
     """
 
     def __init__(self, status: int = 200, chunks: Iterable[bytes] = (), *, hang: bool = False) -> None:
@@ -31,15 +31,23 @@ class FakeResponse:
         self._hang = hang
         self._released = threading.Event()
         self.closed = False
+        self.cancelled = False
 
     def chunks(self, amount: int) -> Iterator[bytes]:
         for chunk in self._chunks:
-            if self.closed:
+            if self.closed or self.cancelled:
                 return
             yield chunk
         # Bounded so a test that forgets to close cannot wedge the suite.
-        if self._hang and not self.closed and not self._released.wait(WAIT_TIMEOUT):
+        if self._hang and not (self.closed or self.cancelled) and not self._released.wait(WAIT_TIMEOUT):
             raise AssertionError("a hanging FakeResponse was never released")
+
+    def cancel(self) -> None:
+        # A real stream is cancelled by dropping its socket, which the reader then trips over.
+        # Releasing the hang is the equivalent here; `closed` stays for close() to set, so a
+        # test can tell the two apart.
+        self.cancelled = True
+        self._released.set()
 
     def close(self) -> None:
         self.closed = True
