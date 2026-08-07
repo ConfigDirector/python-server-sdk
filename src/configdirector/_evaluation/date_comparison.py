@@ -15,7 +15,7 @@ _ISO = re.compile(
     )?
     (?:[T](?P<hour>\d{2}):(?P<minute>\d{2})
       (?::(?P<second>\d{2})
-        (?:\.(?P<fraction>\d{1,}))?
+        (?:\.(?P<fraction>\d+))?
       )?
       (?P<offset>[Zz]|[+-]\d{2}:\d{2})?
     )?

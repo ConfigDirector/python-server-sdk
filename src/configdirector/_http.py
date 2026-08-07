@@ -68,4 +68,4 @@ def _read_text(response: BaseHTTPResponse) -> str:
         )
     # The server always sends UTF-8. Replacing rather than raising keeps a corrupted byte from
     # turning into an exception that reads nothing like the actual problem.
-    return str(payload.decode("utf-8", errors="replace"))
+    return payload.decode("utf-8", errors="replace")

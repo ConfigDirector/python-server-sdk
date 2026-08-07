@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import cast
 
 from ..types import ConfigDirectorLogger, ConfigState
 from ._json_value import to_json_string
-from .condition_evaluator import ConditionEvaluator
+from .condition_evaluator import evaluate_condition
 from .percent_hashing import assign_percentage
 from .types import (
-    Condition,
     ConditionalRule,
     Config,
     EvaluationContext,
@@ -36,7 +34,6 @@ _NO_MATCH = _RuleResult(matched=False)
 class ConfigEvaluator:
     def __init__(self, logger: ConfigDirectorLogger) -> None:
         self._logger = logger
-        self._condition_evaluator = ConditionEvaluator()
 
     def evaluate(self, config: Config, context: EvaluationContext | None = None) -> ConfigState:
         return ConfigState(
@@ -60,12 +57,14 @@ class ConfigEvaluator:
 
     def _evaluate_rule(self, rule: Rule, config: Config, context: EvaluationContext | None) -> _RuleResult:
         try:
-            # Dispatched on the wire value rather than the Python type, so that a rule kind this
-            # version of the SDK does not know about is skipped instead of crashing.
-            if rule.type == "percentage":
-                return self._evaluate_percentage(cast(PercentageRule, rule).percentages, config, context)
-            if rule.type == "conditional":
-                return self._evaluate_conditional_rule(cast(ConditionalRule, rule), config, context)
+            # Gated on the wire value as well as the Python type, so that a rule kind this version
+            # of the SDK does not know about is skipped instead of crashing. The isinstance is what
+            # makes the narrowing checked: a wire kind that disagrees with the object it was parsed
+            # into is skipped too, rather than reaching a field it may not have.
+            if rule.type == "percentage" and isinstance(rule, PercentageRule):
+                return self._evaluate_percentage(rule.percentages, config, context)
+            if rule.type == "conditional" and isinstance(rule, ConditionalRule):
+                return self._evaluate_conditional_rule(rule, config, context)
         except Exception as error:  # malformed rule data must not break the evaluation
             self._logger.warning(
                 "There was an error while evaluating a targeting rule %r for %r. "
@@ -108,16 +107,7 @@ class ConfigEvaluator:
         config: Config,
         context: EvaluationContext | None,
     ) -> _RuleResult:
-        matched: Condition | None = next(
-            (
-                condition
-                for condition in (rule.conditions or [])
-                if self._condition_evaluator.evaluate(condition, context)
-            ),
-            None,
-        )
-
-        if matched is None:
+        if not any(evaluate_condition(condition, context) for condition in rule.conditions or []):
             return _NO_MATCH
         if rule.target == "value" and rule.value is not None:
             return _RuleResult(matched=True, value=to_json_string(rule.value))

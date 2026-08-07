@@ -1,5 +1,5 @@
 from .array_comparison import compare_array
-from .condition_evaluator import ConditionEvaluator
+from .condition_evaluator import evaluate_condition
 from .config_evaluator import ConfigEvaluator
 from .date_comparison import compare_date
 from .numeric_comparison import compare_numeric
@@ -24,7 +24,6 @@ from .types import (
 
 __all__ = [
     "Condition",
-    "ConditionEvaluator",
     "ConditionalRule",
     "Config",
     "ConfigEvaluator",
@@ -44,4 +43,5 @@ __all__ = [
     "compare_numeric",
     "compare_semver",
     "compare_text",
+    "evaluate_condition",
 ]

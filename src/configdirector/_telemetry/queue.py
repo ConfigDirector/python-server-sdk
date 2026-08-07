@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -113,9 +113,8 @@ class ContextRegistry:
 def aggregate(
     events: list[EvaluatedConfigEvent], start_time: datetime, end_time: datetime
 ) -> list[AggregatedEvent]:
-    counts: dict[EvaluatedConfigEvent, int] = {}
-    for event in events:
-        counts[event] = counts.get(event, 0) + 1
+    # Counter preserves first-seen order, so the report keeps the order events were recorded in.
+    counts = Counter(events)
 
     return [
         AggregatedEvent(start_time=start_time, end_time=end_time, count=count, event=event)
