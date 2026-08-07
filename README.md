@@ -163,17 +163,21 @@ import logging
 logging.getLogger("configdirector").setLevel(logging.DEBUG)
 ```
 
-With no logging configured at all, Python still surfaces warnings and errors on `stderr`, so an
-invalid SDK key never passes silently.
+The SDK sets no level of its own, so this logger follows the usual `logging` rules. With nothing
+configured at all, Python still surfaces warnings and errors on `stderr`, so an invalid SDK key
+never passes silently.
 
-Pass any object implementing `ConfigDirectorLogger` to override it — including a different
-stdlib logger, or the SDK's own console logger if you would rather not configure `logging`:
+If you would rather not configure `logging`, `log_level` sets a level on that logger for you:
 
 ```python
-from configdirector import create_console_logger
+client = ConfigDirectorClient("YOUR-SERVER-SDK-KEY", log_level="DEBUG")
+```
 
+Pass any object implementing `ConfigDirectorLogger` to override the logger entirely — a
+different stdlib logger, or your own adapter:
+
+```python
 client = ConfigDirectorClient("YOUR-SERVER-SDK-KEY", logger=logging.getLogger("my_app.flags"))
-client = ConfigDirectorClient("YOUR-SERVER-SDK-KEY", logger=create_console_logger("debug"))
 ```
 
 ### Shutdown

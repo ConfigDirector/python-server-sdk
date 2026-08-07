@@ -1,13 +1,12 @@
 import logging
 
+__all__ = ["LOGGER_NAME", "get_default_logger"]
+
+LOGGER_NAME = __package__ or "configdirector"
+
 
 def get_default_logger(log_level: int | str | None = None) -> logging.Logger:
-    """Return the standard library logger the SDK uses when none is supplied.
-
-    Configure it like any other logger::
-
-        logging.getLogger("configdirector").setLevel(logging.DEBUG)
-    """
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.WARNING if log_level is None else log_level)
+    logger = logging.getLogger(LOGGER_NAME)
+    if log_level is not None:
+        logger.setLevel(log_level)
     return logger

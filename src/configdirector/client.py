@@ -78,8 +78,13 @@ class ConfigDirectorClient:
             recommended so that they can be referenced from targeting rules.
         connection: Connection options such as mode, timeout, and polling interval.
         logger: Any object implementing :class:`~configdirector.types.ConfigDirectorLogger`,
-            including a standard library :class:`logging.Logger`. Defaults to the logger named
-            ``"configdirector"``.
+            including a standard library :class:`logging.Logger`. Defaults to the standard
+            library logger named ``"configdirector"``, which your application configures like
+            any other logger.
+        log_level: A level to set on that default logger, as either a :mod:`logging` constant
+            or its name. A convenience for applications that do not otherwise configure
+            logging; when omitted, the SDK sets no level and the usual ``logging`` rules apply.
+            Ignored when ``logger`` is supplied.
         telemetry: Telemetry queue and flush tuning.
         hooks: Event handlers to attach before the client can emit any event.
 
@@ -633,6 +638,7 @@ def create_client(
     metadata: Metadata | None = None,
     connection: ConnectionOptions | None = None,
     logger: ConfigDirectorLogger | None = None,
+    log_level: int | str | None = None,
     telemetry: TelemetryOptions | None = None,
     hooks: ClientHooks | None = None,
 ) -> ConfigDirectorClient:
@@ -646,6 +652,7 @@ def create_client(
         metadata=metadata,
         connection=connection,
         logger=logger,
+        log_level=log_level,
         telemetry=telemetry,
         hooks=hooks,
     )

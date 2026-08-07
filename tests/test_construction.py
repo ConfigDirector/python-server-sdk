@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from configdirector import (
@@ -30,6 +32,14 @@ def test_create_client_is_equivalent_to_the_constructor() -> None:
 
     assert isinstance(client, ConfigDirectorClient)
     assert client.is_ready is False
+
+
+def test_create_client_takes_every_constructor_option() -> None:
+    # create_client documents itself as equivalent to the constructor, so an option added to one
+    # and not the other is a defect rather than a design choice.
+    assert list(inspect.signature(create_client).parameters) == list(
+        inspect.signature(ConfigDirectorClient).parameters
+    )
 
 
 def test_accepts_every_option() -> None:

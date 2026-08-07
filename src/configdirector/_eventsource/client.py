@@ -160,9 +160,17 @@ class EventSourceClient:
                 self._set_state(ReadyState.CONNECTING)
                 if self._stop.wait(self._reconnect_delay(state)):
                     return
-        except BaseException as error:  # the worker must not die without saying why
-            self._logger.error("[EventSource] The connection loop stopped unexpectedly: %r", error)
+        except BaseException as error:
+            # The loop is over either way, and a state left at OPEN would have callers believing
+            # there is still a reader on the stream.
             self._ready_state = ReadyState.CLOSED
+            # SystemExit and KeyboardInterrupt ask to unwind; they are not stream failures.
+            # Logging one as "the connection stopped" would describe a problem the caller never
+            # had, so they are left to travel as themselves.
+            if not isinstance(error, Exception):
+                raise
+            # Anything else: the worker must not die without saying why.
+            self._logger.error("[EventSource] The connection loop stopped unexpectedly: %r", error)
 
     def _connect_once(self) -> _Failure | None:
         try:

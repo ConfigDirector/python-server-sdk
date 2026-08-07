@@ -17,7 +17,7 @@ from configdirector._eventsource import (
 )
 
 from .helpers import FailingTransport, FakeResponse, FakeTransport, sse, wait_for
-from helpers import create_stubbed_logger
+from helpers import RecordingLogger, create_stubbed_logger
 
 URL = "http://localhost/sse"
 _R = TypeVar("_R")
@@ -381,6 +381,40 @@ class TestErrors:
 
         client.connect()
         assert wait_for(lambda: received == ["one", "two"])
+
+    # The escaping SystemExit is the point of the test: it reaches threading.excepthook as
+    # itself instead of being logged as a connection error, and pytest reports that as a warning.
+    @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+    def test_system_exit_from_a_handler_is_not_reported_as_a_loop_failure(
+        self, clients: list[EventSourceClient]
+    ) -> None:
+        # SystemExit is a deliberate request to unwind, not a stream error. Logging it as one
+        # would leave a caller that raised it looking at an unexplained connection failure.
+        recording = RecordingLogger()
+        delivered = threading.Event()
+
+        def exit_now(message: EventSourceMessage) -> None:
+            delivered.set()
+            raise SystemExit(1)
+
+        client = build(
+            clients,
+            logger=recording,
+            transport=FakeTransport(FakeResponse(chunks=sse("data: one\n\n"))),
+            on_message=exit_now,
+            should_reconnect=lambda state: False,
+        )
+
+        client.connect()
+        assert delivered.wait(timeout=5)
+        worker = client._thread
+        assert worker is not None
+        worker.join(timeout=5)
+        assert worker.is_alive() is False
+
+        assert recording.messages("error") == []
+        # The loop still leaves the state honest on its way out.
+        assert client.ready_state is ReadyState.CLOSED
 
     def test_a_raising_should_reconnect_falls_back_to_reconnecting(
         self, clients: list[EventSourceClient]

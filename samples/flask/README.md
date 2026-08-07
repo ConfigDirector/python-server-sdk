@@ -96,11 +96,11 @@ client = ConfigDirectorClient(..., logger=sdk_logger)
 flask_sample.configdirector DEBUG No config state found for 'integer-config', returning default value 10
 ```
 
-Any object with `debug`/`info`/`warning`/`error` methods works — a stdlib `Logger` satisfies
-that, and so does `create_console_logger("debug")` if you would rather not configure the
-`logging` module at all. Omit `logger=` entirely and the SDK falls back to the standard library
-logger named `configdirector`. Set `CONFIGDIRECTOR_LOG_LEVEL=DEBUG` to watch every evaluation as
-it happens.
+Any object with `debug`/`info`/`warning`/`error` methods works, and a stdlib `Logger` satisfies
+that. Omit `logger=` entirely and the SDK falls back to the standard library logger named
+`configdirector`, leaving the level to your application — or pass `log_level=` if you would
+rather not configure the `logging` module at all. Set `CONFIGDIRECTOR_LOG_LEVEL=DEBUG` to watch
+every evaluation as it happens.
 
 **Shutdown is clean.** `atexit` closes the client, dropping connections and flushing pending
 telemetry. A production deployment would also hook its server's worker-exit signal.

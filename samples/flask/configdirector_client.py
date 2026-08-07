@@ -50,9 +50,9 @@ logger = logging.getLogger(__name__)
 # named "configdirector"; passing one in puts its output under this application's own logging
 # namespace instead, where existing handlers, filters, and level config already apply.
 #
-# Any object with debug/info/warning/error methods works — a stdlib Logger satisfies that, and
-# so does `configdirector.create_console_logger("debug")` if you would rather not configure the
-# logging module at all.
+# Any object with debug/info/warning/error methods works, and a stdlib Logger satisfies that.
+# Passing `log_level=` instead of `logger=` is the shortcut when you would rather not configure
+# the logging module at all.
 sdk_logger = logging.getLogger("flask_sample.configdirector")
 sdk_logger.setLevel(os.environ.get("CONFIGDIRECTOR_LOG_LEVEL", "INFO"))
 
