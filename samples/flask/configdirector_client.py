@@ -68,7 +68,7 @@ connection = ConnectionOptions(
 
 # Created once, at import. Constructing the client makes no network calls.
 client = ConfigDirectorClient(
-    os.environ.get("CONFIGDIRECTOR_SERVER_KEY", ""),
+    os.environ.get("CONFIGDIRECTOR_SERVER_KEY", "fake-sample-key"),
     metadata=Metadata(app_name="flask-sample", app_version="1.0.0"),
     connection=connection,
     logger=sdk_logger,

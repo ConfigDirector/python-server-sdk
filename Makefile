@@ -1,4 +1,4 @@
-.PHONY: install hooks lint format typecheck test coverage build verify-lock dist-check samples check check-all clean
+.PHONY: install hooks lint format typecheck test coverage build verify-lock dist-check samples profile check check-all clean
 
 install:
 	uv sync --all-extras
@@ -57,6 +57,13 @@ samples:
 		printf '\n\033[1m==> sample %s\033[0m\n' "$$(basename $$sample)"; \
 		(cd "$$sample" && uv sync --quiet && uv run mypy && uv run pytest) || exit 1; \
 	done
+
+# Exploratory load profile of the Flask sample: see profiling/README.md. Deliberately not part
+# of `check-all` — it needs a real server SDK key, takes minutes, and measures the machine it
+# ran on as much as the SDK. Pass options through, e.g. `make profile ARGS="--rps 100"`.
+profile:
+	@printf '\n\033[1m==> profile\033[0m\n'
+	(cd profiling && uv sync --quiet && uv run python run.py $(ARGS))
 
 # The fast loop while working.
 check: lint typecheck test

@@ -118,12 +118,15 @@ class HttpEventReporter:
             )
             return ReporterResponse(success=False, fatal=True)
 
-        if not response.ok:
+        if response.ok:
+            self._logger.debug("[EventReporter] Telemetry report successfully sent.")
+        else:
             self._logger.warning(
                 "[EventReporter] The telemetry endpoint responded with status %s. The events in "
                 "this report were discarded.",
                 response.status,
             )
+
         return ReporterResponse(success=response.ok)
 
 
