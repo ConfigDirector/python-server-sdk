@@ -72,15 +72,41 @@ class _Stream:
             # this response is finished; whether to reconnect is the reader's decision.
             raise StreamClosedError(f"The response stream ended: {error}") from error
 
-    def close(self) -> None:
-        # Closing the response is not enough on its own: a read already in flight stays parked
-        # until the server happens to send something, so close() would hang behind an idle
-        # stream. shutdown() is urllib3's supported way to end that read from another thread.
-        # It objects when there is no longer a socket to shut down, which is exactly the case
-        # where no reader is parked on one.
+    def cancel(self) -> None:
+        # Deliberately does not close the response. A reader parked in recv() holds the
+        # buffered reader's lock until it returns, and closing the response takes that same
+        # lock, so doing it here would park the caller behind the read it is trying to end.
+        # Both steps below only touch the socket.
         with contextlib.suppress(ValueError, RuntimeError, OSError):
+            # urllib3's supported way to end a read from another thread. It objects when there
+            # is no longer a socket to shut down, which is the case where nothing is parked.
             self._response.shutdown()
+        _close_socket(self._response)
+
+    def close(self) -> None:
         self._response.close()
+
+
+def _close_socket(response: BaseHTTPResponse) -> None:
+    """Closes the connection's socket for real, cancelling any read parked on it.
+
+    shutdown() is enough on POSIX, where it wakes the parked recv(). Winsock only disallows
+    *subsequent* receives, so on Windows the reader stays in the kernel; closesocket() is what
+    documents itself as cancelling a pending blocking call, and it is the only thing that does.
+
+    Neither `HTTPConnection.close()` nor `socket.close()` reaches closesocket() here: http.client
+    holds the socket through `makefile()`, which pins `_io_refs` above zero, and `socket.close()`
+    only flags the socket and defers the real close to whoever drops the last file object -- the
+    buffered reader, whose teardown is exactly what is blocked. `_real_close()` is the unguarded
+    form. Both it and urllib3's `_connection` are private, so every step is optional: if any of
+    them moves, this degrades to shutdown()-only rather than raising out of cancel().
+    """
+    sock = getattr(getattr(response, "_connection", None), "sock", None)
+    real_close = getattr(sock, "_real_close", None)
+    if real_close is None:
+        return
+    with contextlib.suppress(Exception):
+        real_close()
 
 
 def open_stream(request: StreamRequest) -> ResponseStream:

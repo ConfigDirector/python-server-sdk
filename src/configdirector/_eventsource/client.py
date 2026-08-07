@@ -122,9 +122,13 @@ class EventSourceClient:
 
         stop.set()
         # Drops the connection under the reader, so a chunks() call blocked waiting for the next
-        # event gives up instead of holding close() until the server sends something.
+        # event gives up instead of holding close() until the server sends something. Cancelling
+        # rather than closing is what keeps this thread out of the reader's way: releasing the
+        # response needs a lock the parked reader holds, so the reader does that itself on the
+        # way out. Should the cancel fail to land, close() still returns on the join timeout
+        # below, having leaked a stream rather than hung its caller.
         if response is not None:
-            _close_quietly(response)
+            _cancel_quietly(response)
         # Joining from the worker itself would deadlock, and close() is reachable from a handler.
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=_CLOSE_TIMEOUT)
@@ -319,6 +323,11 @@ def _close_quietly(response: ResponseStream | None) -> None:
     # Already broken; there is nothing useful left to do about a failure here.
     with contextlib.suppress(Exception):
         response.close()
+
+
+def _cancel_quietly(response: ResponseStream) -> None:
+    with contextlib.suppress(Exception):
+        response.cancel()
 
 
 def _name(callback: Callable[..., Any]) -> str:
