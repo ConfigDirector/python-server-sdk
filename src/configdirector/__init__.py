@@ -25,7 +25,6 @@ from .errors import (
     ConfigDirectorTypeError,
     ConfigDirectorValidationError,
 )
-from .logger import ConsoleLogger, create_console_logger, get_default_logger
 from .types import (
     ClientEvent,
     ClientHooks,
@@ -41,7 +40,6 @@ from .types import (
     ConnectionOptions,
     Context,
     EvaluationReason,
-    LoggingLevel,
     Metadata,
     Subscription,
     TelemetryOptions,
@@ -67,16 +65,12 @@ __all__ = [
     "ConfigsUpdatedEvent",
     "ConnectionMode",
     "ConnectionOptions",
-    "ConsoleLogger",
     "Context",
     "EvaluationReason",
-    "LoggingLevel",
     "Metadata",
     "Subscription",
     "TelemetryOptions",
     "WatchHandler",
     "__version__",
     "create_client",
-    "create_console_logger",
-    "get_default_logger",
 ]

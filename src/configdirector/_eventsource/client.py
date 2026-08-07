@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from ..errors import ConfigDirectorTypeError
-from ..logger import get_default_logger
 from ..types import ConfigDirectorLogger
 from .errors import StreamClosedError, ValueOutOfRangeError
 from .parser import DEFAULT_MAX_EVENT_CHARS, DEFAULT_MAX_LINE_CHARS, EventSourceParser
@@ -52,7 +51,7 @@ class EventSourceClient:
         read_timeout: float | None = None,
         follow_redirects: bool = True,
         transport: Callable[[StreamRequest], ResponseStream] = open_stream,
-        logger: ConfigDirectorLogger | None = None,
+        logger: ConfigDirectorLogger,
         on_connect: Callable[[], None] | None = None,
         on_disconnect: Callable[[], None] | None = None,
         on_message: Callable[[EventSourceMessage], None] | None = None,
@@ -73,7 +72,7 @@ class EventSourceClient:
         self._read_timeout = read_timeout
         self._follow_redirects = follow_redirects
         self._transport = transport
-        self._logger = logger if logger is not None else get_default_logger()
+        self._logger = logger
         self._max_line_chars = max_line_chars
         self._max_event_chars = max_event_chars
 

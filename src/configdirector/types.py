@@ -23,7 +23,6 @@ __all__ = [
     "ConnectionOptions",
     "Context",
     "EvaluationReason",
-    "LoggingLevel",
     "Metadata",
     "Subscription",
     "TelemetryOptions",
@@ -50,9 +49,6 @@ ConfigValueT = TypeVar("ConfigValueT", bound=ConfigValue)
 
 ConnectionMode = Literal["streaming", "polling", "one-time"]
 """How the SDK retrieves config state from ConfigDirector."""
-
-LoggingLevel = Literal["debug", "info", "warning", "error", "off"]
-"""Verbosity of the SDK's console logger."""
 
 EvaluationReason = Literal[
     "found-match",

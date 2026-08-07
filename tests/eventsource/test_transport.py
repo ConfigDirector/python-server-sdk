@@ -18,8 +18,11 @@ from configdirector._eventsource import (
 from configdirector._eventsource.transport import _Stream
 
 from .helpers import wait_for
+from helpers import create_stubbed_logger
 
 Handler = Callable[[http.server.BaseHTTPRequestHandler], None]
+
+logger = create_stubbed_logger()
 
 
 class _Server:
@@ -102,6 +105,7 @@ def test_events_arrive_as_the_server_sends_them(serve: Callable[[Handler], _Serv
         server.url,
         on_message=lambda message: arrivals.append((message.data, time.monotonic() - started)),
         should_reconnect=lambda state: False,
+        logger=logger,
     )
 
     try:
@@ -129,7 +133,7 @@ def test_close_interrupts_a_read_that_is_already_blocked(
 
     server = serve(handle)
     connected = threading.Event()
-    client = EventSourceClient(server.url, on_connect=connected.set)
+    client = EventSourceClient(server.url, on_connect=connected.set, logger=logger)
 
     try:
         client.connect()
@@ -161,6 +165,7 @@ def test_a_server_error_status_is_reported_without_an_error(
         server.url,
         on_error=errors.append,
         should_reconnect=_collect_status(statuses),
+        logger=logger,
     )
 
     try:
@@ -180,7 +185,7 @@ def test_no_content_disconnects_without_retrying(serve: Callable[[Handler], _Ser
 
     server = serve(handle)
     disconnected = threading.Event()
-    client = EventSourceClient(server.url, on_disconnect=disconnected.set)
+    client = EventSourceClient(server.url, on_disconnect=disconnected.set, logger=logger)
 
     try:
         client.connect()
@@ -206,7 +211,9 @@ def test_a_redirect_is_followed_by_default(serve: Callable[[Handler], _Server]) 
 
     server = serve(handle)
     received: list[EventSourceMessage] = []
-    client = EventSourceClient(server.url, on_message=received.append, should_reconnect=lambda state: False)
+    client = EventSourceClient(
+        server.url, on_message=received.append, should_reconnect=lambda state: False, logger=logger
+    )
 
     try:
         client.connect()
@@ -230,9 +237,7 @@ def test_a_redirect_is_a_status_when_following_is_disabled(
     server = serve(handle)
     statuses: list[int | None] = []
     client = EventSourceClient(
-        server.url,
-        follow_redirects=False,
-        should_reconnect=_collect_status(statuses),
+        server.url, follow_redirects=False, should_reconnect=_collect_status(statuses), logger=logger
     )
 
     try:
@@ -260,7 +265,9 @@ def test_a_multibyte_character_split_across_reads_survives(
 
     server = serve(handle)
     received: list[EventSourceMessage] = []
-    client = EventSourceClient(server.url, on_message=received.append, should_reconnect=lambda state: False)
+    client = EventSourceClient(
+        server.url, on_message=received.append, should_reconnect=lambda state: False, logger=logger
+    )
 
     try:
         client.connect()

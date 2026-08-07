@@ -17,9 +17,12 @@ from configdirector._eventsource import (
 )
 
 from .helpers import FailingTransport, FakeResponse, FakeTransport, sse, wait_for
+from helpers import create_stubbed_logger
 
 URL = "http://localhost/sse"
 _R = TypeVar("_R")
+
+logger = create_stubbed_logger()
 
 
 def record(sink: list[Any], attribute: str | None, *, returning: _R) -> Callable[[ReconnectionState], _R]:
@@ -49,6 +52,7 @@ def clients() -> Iterator[list[EventSourceClient]]:
 
 
 def build(clients: list[EventSourceClient], **kwargs: object) -> EventSourceClient:
+    kwargs.setdefault("logger", logger)
     client = EventSourceClient(URL, **kwargs)  # type: ignore[arg-type]
     clients.append(client)
     return client
@@ -606,7 +610,7 @@ class TestInvalidOptions:
     )
     def test_a_non_callable_handler_is_rejected(self, option: str) -> None:
         with pytest.raises(ConfigDirectorTypeError, match=option):
-            EventSourceClient(URL, **{option: "not callable"})  # type: ignore[arg-type]
+            EventSourceClient(URL, logger=logger, **{option: "not callable"})  # type: ignore[arg-type]
 
 
 class TestConcurrentLifecycle:

@@ -1,12 +1,3 @@
-"""Reader behaviour against a real socket.
-
-The fakes in `helpers.py` hand back a prepared list of chunks, so they cannot show whether a
-stream survives being idle, whether events arrive as they are sent rather than in a buffer, or
-whether close() can interrupt a read that is genuinely parked on a socket. Every bug this file
-guards against was invisible to the fakes and reproduced only against a real server, so the
-tests here use one, over real chunked framing.
-"""
-
 from __future__ import annotations
 
 import http.server
@@ -18,8 +9,11 @@ import pytest
 from configdirector._eventsource import EventSourceClient, EventSourceMessage
 
 from .helpers import wait_for
+from helpers import create_stubbed_logger
 
 Handler = Callable[[http.server.BaseHTTPRequestHandler, threading.Event], None]
+
+logger = create_stubbed_logger()
 
 
 class _Server:
@@ -112,6 +106,7 @@ class TestIdleStream:
             server.url,
             method="POST",
             on_message=lambda message: received.append(message.data),
+            logger=logger,
         )
         clients.append(client)
         client.connect()
@@ -130,7 +125,7 @@ class TestIdleStream:
 
         server = serve(handle)
         received: list[EventSourceMessage] = []
-        client = EventSourceClient(server.url, method="POST", on_message=received.append)
+        client = EventSourceClient(server.url, method="POST", on_message=received.append, logger=logger)
         clients.append(client)
         client.connect()
 
@@ -151,7 +146,7 @@ class TestClosePromptness:
 
         server = serve(handle)
         received: list[EventSourceMessage] = []
-        client = EventSourceClient(server.url, method="POST", on_message=received.append)
+        client = EventSourceClient(server.url, method="POST", on_message=received.append, logger=logger)
         clients.append(client)
         client.connect()
         assert wait_for(lambda: len(received) >= 1)

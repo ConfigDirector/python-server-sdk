@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from ._bundle import ConfigBundle
 from ._evaluation import Config, ConfigEvaluator, EvaluationContext
+from ._logger import get_default_logger
 from ._telemetry import (
     MAX_EVENT_QUEUE_LIMIT,
     MIN_EVENT_QUEUE_LIMIT,
@@ -22,7 +23,6 @@ from ._transport import TransportOptions, create_transport
 from ._value_parser import parse_config_value
 from ._version import SDK_NAME, __version__
 from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
-from .logger import get_default_logger
 from .types import (
     ClientEvent,
     ClientHooks,
@@ -95,10 +95,11 @@ class ConfigDirectorClient:
         metadata: Metadata | None = None,
         connection: ConnectionOptions | None = None,
         logger: ConfigDirectorLogger | None = None,
+        log_level: int | str | None = None,
         telemetry: TelemetryOptions | None = None,
         hooks: ClientHooks | None = None,
     ) -> None:
-        self._logger = logger if logger is not None else get_default_logger()
+        self._logger = logger if logger is not None else get_default_logger(log_level)
         if _is_blank(server_sdk_key):
             raise ConfigDirectorValidationError(
                 "No server SDK key was provided, the client cannot be instantiated without a "

@@ -17,7 +17,13 @@ from configdirector._evaluation import (
 )
 from configdirector._telemetry import TelemetryCollectorOptions
 from configdirector._transport import TransportOptions
-from configdirector.types import ConfigType, ConfigValue, Context, EvaluationReason
+from configdirector.types import (
+    ConfigDirectorLogger,
+    ConfigType,
+    ConfigValue,
+    Context,
+    EvaluationReason,
+)
 
 WAIT_TIMEOUT = 5.0
 
@@ -29,6 +35,20 @@ def wait_for(predicate: Callable[[], bool], *, timeout: float = WAIT_TIMEOUT) ->
             return True
         time.sleep(0.002)
     return predicate()
+
+
+class StubbedLogger:
+    def debug(self, message: str, /, *args: Any) -> None: ...
+
+    def info(self, message: str, /, *args: Any) -> None: ...
+
+    def warning(self, message: str, /, *args: Any) -> None: ...
+
+    def error(self, message: str, /, *args: Any) -> None: ...
+
+
+def create_stubbed_logger() -> ConfigDirectorLogger:
+    return StubbedLogger()
 
 
 class RecordingLogger:

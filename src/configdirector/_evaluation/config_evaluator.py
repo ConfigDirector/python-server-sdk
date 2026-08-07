@@ -35,12 +35,6 @@ _NO_MATCH = _RuleResult(matched=False)
 
 class ConfigEvaluator:
     def __init__(self, logger: ConfigDirectorLogger) -> None:
-        for method in ("debug", "info", "warning", "error"):
-            if not callable(getattr(logger, method, None)):
-                raise TypeError(
-                    f"The provided logger is not a valid ConfigDirectorLogger: it has no "
-                    f"callable '{method}' method."
-                )
         self._logger = logger
         self._condition_evaluator = ConditionEvaluator()
 
