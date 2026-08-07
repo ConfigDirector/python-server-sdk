@@ -80,7 +80,28 @@ class _Stream:
         # where no reader is parked on one.
         with contextlib.suppress(ValueError, RuntimeError, OSError):
             self._response.shutdown()
+        # shutdown() finishes the job on POSIX, where it wakes the parked recv(). Winsock only
+        # disallows *subsequent* receives, so on Windows the reader stays in the kernel holding
+        # the response's buffered-reader lock, and the close() below would block acquiring that
+        # same lock -- forever, on whichever thread called close(). closesocket() is what
+        # cancels a pending blocking call, and HTTPConnection.close() drops the socket before it
+        # touches the buffered reader, so it has to run first.
+        _drop_socket(self._response)
         self._response.close()
+
+
+def _drop_socket(response: BaseHTTPResponse) -> None:
+    """Closes the connection's socket, cancelling any read parked on it.
+
+    `_connection` is private, but urllib3 exposes no public way to reach the socket and there is
+    no other way to cancel a blocking read on Windows. A urllib3 that moves or drops it leaves
+    this a no-op, which is the behaviour we had before.
+    """
+    connection = getattr(response, "_connection", None)
+    if connection is None:
+        return
+    with contextlib.suppress(Exception):
+        connection.close()
 
 
 def open_stream(request: StreamRequest) -> ResponseStream:

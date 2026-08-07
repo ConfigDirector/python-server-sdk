@@ -4,8 +4,10 @@ import http.server
 import threading
 import time
 from collections.abc import Callable, Iterator
+from typing import cast
 
 import pytest
+from urllib3.response import BaseHTTPResponse
 
 from configdirector._eventsource import (
     EventSourceClient,
@@ -13,6 +15,7 @@ from configdirector._eventsource import (
     ReadyState,
     ReconnectionState,
 )
+from configdirector._eventsource.transport import _Stream
 
 from .helpers import wait_for
 
@@ -266,3 +269,69 @@ def test_a_multibyte_character_split_across_reads_survives(
         client.close()
 
     assert received[0].data == payload
+
+
+class TestStreamClose:
+    """The teardown order in `_Stream.close()`, which no live test can pin on a POSIX runner.
+
+    A reader parked in `recv()` holds the response's buffered-reader lock for as long as it is
+    parked. `shutdown()` wakes it on POSIX, so the order is invisible there; Winsock leaves it
+    parked, and closing the response then blocks on that lock forever. Only closing the socket
+    cancels the pending read, so the connection has to go first.
+    """
+
+    class _Connection:
+        def __init__(self, calls: list[str]) -> None:
+            self._calls = calls
+
+        def close(self) -> None:
+            self._calls.append("connection.close")
+
+    class _Response:
+        status = 200
+
+        def __init__(self, calls: list[str], *, shutdown_error: Exception | None = None) -> None:
+            self._calls = calls
+            self._shutdown_error = shutdown_error
+            self._connection = TestStreamClose._Connection(calls)
+
+        def shutdown(self) -> None:
+            self._calls.append("shutdown")
+            if self._shutdown_error is not None:
+                raise self._shutdown_error
+
+        def close(self) -> None:
+            self._calls.append("response.close")
+
+    def test_the_socket_is_dropped_before_the_response_is_closed(self) -> None:
+        calls: list[str] = []
+        _Stream(cast(BaseHTTPResponse, self._Response(calls))).close()
+
+        assert calls == ["shutdown", "connection.close", "response.close"]
+
+    def test_a_refused_shutdown_does_not_skip_the_rest_of_the_teardown(self) -> None:
+        # urllib3 raises when there is no longer a socket to shut down, which is exactly the
+        # case where nothing is parked on one. The response still has to be closed.
+        calls: list[str] = []
+        response = self._Response(calls, shutdown_error=ValueError("no socket"))
+        _Stream(cast(BaseHTTPResponse, response)).close()
+
+        assert calls == ["shutdown", "connection.close", "response.close"]
+
+    def test_a_response_without_a_connection_is_still_closed(self) -> None:
+        # Guards the getattr fallback: a urllib3 that renames `_connection` must degrade to the
+        # old behaviour rather than raising out of close().
+        calls: list[str] = []
+
+        class Bare:
+            status = 200
+
+            def shutdown(self) -> None:
+                calls.append("shutdown")
+
+            def close(self) -> None:
+                calls.append("response.close")
+
+        _Stream(cast(BaseHTTPResponse, Bare())).close()
+
+        assert calls == ["shutdown", "response.close"]
