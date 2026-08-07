@@ -18,9 +18,9 @@ from configdirector._eventsource import (
     StreamRequest,
 )
 from configdirector._eventsource.transport import _Stream
+from tests.helpers import create_stubbed_logger
 
 from .helpers import wait_for
-from helpers import create_stubbed_logger
 
 Handler = Callable[[http.server.BaseHTTPRequestHandler], None]
 

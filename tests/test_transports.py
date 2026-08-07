@@ -16,8 +16,7 @@ from configdirector._transport import (
     TransportOptions,
 )
 from configdirector.errors import ConfigDirectorConnectionError
-
-from helpers import RecordingLogger, wait_for
+from tests.helpers import RecordingLogger, wait_for
 
 Handler = Callable[[http.server.BaseHTTPRequestHandler], None]
 

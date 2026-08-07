@@ -3,8 +3,7 @@ from __future__ import annotations
 import pytest
 
 import configdirector.client
-
-from helpers import TelemetryRecorder, TransportRecorder
+from tests.helpers import TelemetryRecorder, TransportRecorder
 
 
 @pytest.fixture(autouse=True)

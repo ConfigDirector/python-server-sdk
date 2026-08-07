@@ -17,8 +17,7 @@ from configdirector._telemetry.queue import AggregatedEvent
 from configdirector._telemetry.reporter import EventReport, HttpEventReporter
 from configdirector.errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 from configdirector.types import Context
-
-from helpers import RecordingLogger
+from tests.helpers import RecordingLogger
 
 BASE_URL = "https://server-sdk-api.configdirector.com"
 START = datetime(2026, 1, 1, 0, 0, 0, 500_000, tzinfo=timezone.utc)

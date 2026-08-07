@@ -12,8 +12,7 @@ from configdirector._evaluation import (
     NumericTypeConstraints,
     PercentageRule,
 )
-
-from helpers import RecordingLogger
+from tests.helpers import RecordingLogger
 
 
 def wire_config(**overrides: Any) -> dict[str, Any]:

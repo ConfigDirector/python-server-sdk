@@ -7,9 +7,9 @@ from collections.abc import Callable, Iterator
 import pytest
 
 from configdirector._eventsource import EventSourceClient, EventSourceMessage
+from tests.helpers import create_stubbed_logger
 
 from .helpers import wait_for
-from helpers import create_stubbed_logger
 
 Handler = Callable[[http.server.BaseHTTPRequestHandler, threading.Event], None]
 

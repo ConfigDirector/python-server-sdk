@@ -15,9 +15,9 @@ from configdirector._eventsource import (
     StreamClosedError,
     ValueOutOfRangeError,
 )
+from tests.helpers import RecordingLogger, create_stubbed_logger
 
 from .helpers import FailingTransport, FakeResponse, FakeTransport, sse, wait_for
-from helpers import RecordingLogger, create_stubbed_logger
 
 URL = "http://localhost/sse"
 _R = TypeVar("_R")

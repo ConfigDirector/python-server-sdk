@@ -8,8 +8,7 @@ import pytest
 from configdirector._telemetry.collector import TelemetryCollector, TelemetryCollectorOptions
 from configdirector._telemetry.reporter import EventReport, ReporterResponse
 from configdirector.types import Context
-
-from helpers import RecordingLogger, wait_for
+from tests.helpers import RecordingLogger, wait_for
 
 # Long enough that the flush thread never fires on its own; tests that care about the interval
 # ask for a short one.

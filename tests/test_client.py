@@ -22,8 +22,7 @@ from configdirector import (
     TelemetryOptions,
 )
 from configdirector._telemetry import TelemetryCollector
-
-from helpers import (
+from tests.helpers import (
     RecordedEvaluation,
     RecordingLogger,
     TelemetryRecorder,
