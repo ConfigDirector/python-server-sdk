@@ -20,7 +20,7 @@ Why it matters:
 * **Watches and hooks are registered on the instance.** They only fire for as long as the client
   they were registered on is alive.
 
-So: never build a ``ConfigDirectorClient`` inside a request handler.
+So: never call ``create_client()`` inside a request handler.
 
 Concurrency is not a reason to make more of them — the client is thread-safe, so every worker
 thread in the WSGI server shares this one instance safely. Process-based servers (Gunicorn
@@ -35,7 +35,7 @@ import logging
 import os
 from typing import cast
 
-from configdirector import ConfigDirectorClient, ConnectionMode, ConnectionOptions, Metadata
+from configdirector import ConnectionMode, ConnectionOptions, Metadata, create_client
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -66,8 +66,8 @@ connection = ConnectionOptions(
     timeout=float(os.environ.get("CONFIGDIRECTOR_TIMEOUT", "3")),
 )
 
-# Created once, at import. Constructing the client makes no network calls.
-client = ConfigDirectorClient(
+# Created once, at import. Creating the client makes no network calls.
+client = create_client(
     os.environ.get("CONFIGDIRECTOR_SERVER_KEY", "fake-sample-key"),
     metadata=Metadata(app_name="flask-sample", app_version="1.0.0"),
     connection=connection,

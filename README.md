@@ -17,9 +17,9 @@ Requires Python 3.10 or newer.
 ## Usage
 
 ```python
-from configdirector import ConfigDirectorClient, Context, Metadata
+from configdirector import Context, Metadata, create_client
 
-client = ConfigDirectorClient(
+client = create_client(
     "YOUR-SERVER-SDK-KEY",
     metadata=Metadata(app_name="my-awesome-app", app_version="1.0.0"),
 )
@@ -29,11 +29,20 @@ if client.get_value("new-checkout", False, Context(id="user-123")):
     ...
 ```
 
+`create_client(...)` is how you create a client, and matches the other ConfigDirector SDKs.
+`ConfigDirectorClient` is the interface a client satisfies — annotate against it, but build one
+with `create_client`, since an interface cannot be instantiated:
+
+```python
+from configdirector import ConfigDirectorClient
+
+
+def in_new_checkout(client: ConfigDirectorClient, user_id: str) -> bool:
+    return client.get_value("new-checkout", False, Context(id=user_id))
+```
+
 Create a single client for the lifetime of your application, call `initialize()` during startup,
 and `close()` during shutdown. The client is safe to share across threads.
-
-`create_client(...)` is available as an alias for the constructor, for consistency with the other
-ConfigDirector SDKs.
 
 ### Evaluating configs
 
@@ -94,7 +103,7 @@ be attached up front with `hooks=`:
 ```python
 from configdirector import ClientHooks
 
-client = ConfigDirectorClient(
+client = create_client(
     "YOUR-SERVER-SDK-KEY",
     hooks=ClientHooks(config_evaluated=lambda event: print(event.evaluation)),
 )
@@ -105,7 +114,7 @@ client = ConfigDirectorClient(
 ```python
 from configdirector import ConnectionOptions
 
-client = ConfigDirectorClient(
+client = create_client(
     "YOUR-SERVER-SDK-KEY",
     connection=ConnectionOptions(mode="polling", polling_interval=30, timeout=5),
 )
@@ -138,7 +147,7 @@ are made:
 ```python
 from configdirector import TelemetryOptions
 
-client = ConfigDirectorClient(
+client = create_client(
     "YOUR-SERVER-SDK-KEY",
     telemetry=TelemetryOptions(event_queue_limit=10_000, flush_interval=15),
 )
@@ -170,14 +179,14 @@ never passes silently.
 If you would rather not configure `logging`, `log_level` sets a level on that logger for you:
 
 ```python
-client = ConfigDirectorClient("YOUR-SERVER-SDK-KEY", log_level="DEBUG")
+client = create_client("YOUR-SERVER-SDK-KEY", log_level="DEBUG")
 ```
 
 Pass any object implementing `ConfigDirectorLogger` to override the logger entirely — a
 different stdlib logger, or your own adapter:
 
 ```python
-client = ConfigDirectorClient("YOUR-SERVER-SDK-KEY", logger=logging.getLogger("my_app.flags"))
+client = create_client("YOUR-SERVER-SDK-KEY", logger=logging.getLogger("my_app.flags"))
 ```
 
 ### Shutdown
@@ -193,7 +202,7 @@ than once.
 The client is also a context manager — it initializes on entry and closes on exit:
 
 ```python
-with ConfigDirectorClient("YOUR-SERVER-SDK-KEY") as client:
+with create_client("YOUR-SERVER-SDK-KEY") as client:
     if client.get_value("new-checkout", False):
         ...
 ```

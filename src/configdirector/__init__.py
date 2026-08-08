@@ -4,9 +4,9 @@ ConfigDirector is a remote configuration and feature flag service.
 
 Example::
 
-    from configdirector import ConfigDirectorClient, Context, Metadata
+    from configdirector import Context, Metadata, create_client
 
-    client = ConfigDirectorClient(
+    client = create_client(
         "YOUR-SERVER-SDK-KEY",
         metadata=Metadata(app_name="my-awesome-app", app_version="1.0.0"),
     )
@@ -17,7 +17,7 @@ Example::
 """
 
 from ._version import __version__
-from .client import ConfigDirectorClient, create_client
+from .client import create_client
 from .errors import (
     ConfigDirectorConnectionError,
     ConfigDirectorError,
@@ -30,6 +30,7 @@ from .types import (
     ClientHooks,
     ClientReadyEvent,
     ClientReadyHandler,
+    ConfigDirectorClient,
     ConfigDirectorLogger,
     ConfigEvaluatedEvent,
     ConfigEvaluatedHandler,

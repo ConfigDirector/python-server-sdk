@@ -29,6 +29,7 @@ from .types import (
     ClientEvent,
     ClientHooks,
     ClientReadyEvent,
+    ConfigDirectorClient,
     ConfigDirectorLogger,
     ConfigEvaluatedEvent,
     ConfigEvaluation,
@@ -45,7 +46,7 @@ from .types import (
     WatchHandler,
 )
 
-__all__ = ["ConfigDirectorClient", "create_client"]
+__all__ = ["create_client"]
 
 _DEFAULT_BASE_URL = "https://server-sdk-api.configdirector.com"
 
@@ -61,17 +62,12 @@ class _Watcher:
     context: Context | None
 
 
-class ConfigDirectorClient:
-    """The ConfigDirector SDK client.
+class _ConfigDirectorClient(ConfigDirectorClient):
+    """The implementation of :class:`~configdirector.types.ConfigDirectorClient`.
 
-    Applications should create a single client, call :meth:`initialize` during startup, and
-    :meth:`close` during shutdown. The client is safe to share across threads.
-
-    Using it as a context manager initializes it on entry and closes it on exit::
-
-        with ConfigDirectorClient("YOUR-SERVER-SDK-KEY") as client:
-            if client.get_value("new-checkout", False, Context(id="user-123")):
-                ...
+    Private, and built through :func:`create_client`. The public interface it satisfies is what
+    applications annotate against, and is where the behaviour of each method is documented; the
+    docstrings are inherited from it, so they are not repeated here.
 
     Args:
         server_sdk_key: Your ConfigDirector server SDK key. This is a secret value — do not
@@ -173,28 +169,6 @@ class ConfigDirectorClient:
     # -- lifecycle --------------------------------------------------------------------
 
     def initialize(self, timeout: float | None = None) -> None:
-        """Connect to ConfigDirector and retrieve config definitions.
-
-        This blocks until the initial config state has been received or the timeout elapses.
-        Until initialization succeeds, every config returns the default you pass to
-        :meth:`get_value` or :meth:`watch`.
-
-        If the connection fails or is interrupted by a transient error (network error, internal
-        server error, and so on) the client keeps trying to connect. If it fails with a
-        persistent error, such as an invalid SDK key, the client stops retrying and the error is
-        logged.
-
-        This does not raise on connection failure — check :attr:`is_ready` to find out whether
-        config state was actually received.
-
-        Args:
-            timeout: Seconds to wait, overriding
-                :attr:`~configdirector.types.ConnectionOptions.timeout` for this call.
-
-        Raises:
-            ConfigDirectorValidationError: If ``timeout`` is not positive, or the client is
-                closed.
-        """
         effective_timeout = timeout if timeout is not None else self._connection.timeout
         if effective_timeout <= 0:
             raise ConfigDirectorValidationError(
@@ -234,26 +208,15 @@ class ConfigDirectorClient:
 
     @property
     def is_ready(self) -> bool:
-        """Whether the client is ready following a call to :meth:`initialize`.
-
-        Ready means the connection to the server succeeded and config definitions were received.
-        """
         with self._lock:
             return self._ready
 
     @property
     def closed(self) -> bool:
-        """Whether :meth:`close` has been called."""
         with self._lock:
             return self._closed
 
     def close(self) -> None:
-        """Close the client.
-
-        Closes all connections, flushes pending telemetry, and cancels every event and config
-        key subscription. Intended to be called when your application shuts down. Safe to call
-        more than once.
-        """
         with self._lock:
             if self._closed:
                 return
@@ -337,23 +300,6 @@ class ConfigDirectorClient:
         default: ConfigValueT,
         context: Context | None = None,
     ) -> ConfigValueT:
-        """Evaluate a config and return its value for the given context.
-
-        Args:
-            config_key: The config key to evaluate.
-            default: The value to return if config state is unavailable — for example if the
-                client cannot reach the server, or if ``get_value`` is called before
-                initialization completes. Its type also determines the type the config is
-                parsed as.
-            context: The user's context, used for targeting rule evaluation.
-
-        Returns:
-            The evaluated config value, or ``default`` if config state was unavailable.
-
-        Raises:
-            ConfigDirectorValidationError: If ``config_key`` is empty.
-            ConfigDirectorTypeError: If ``default`` is ``None`` or an unsupported type.
-        """
         _validate_config_key(config_key)
         _validate_default(default)
 
@@ -434,16 +380,6 @@ class ConfigDirectorClient:
         context: Context | None = None,
         config_keys: Sequence[str] | None = None,
     ) -> dict[str, ConfigState]:
-        """Return the evaluated :class:`~configdirector.types.ConfigState` for every known key.
-
-        Intended for server-side rendering hydration. This does **not** record telemetry events,
-        and returns an empty mapping when the client is not yet ready.
-
-        Args:
-            context: The user's context, used for targeting rule evaluation.
-            config_keys: Restrict the result to these keys. When omitted, every known key is
-                returned.
-        """
         with self._lock:
             if not self._ready or self._configs is None:
                 return {}
@@ -467,31 +403,6 @@ class ConfigDirectorClient:
         callback: WatchHandler[ConfigValueT],
         context: Context | None = None,
     ) -> Subscription:
-        """Watch a config for updates to its evaluated value.
-
-        Whenever ConfigDirector sends an update to this config, it is re-evaluated against
-        ``context`` and ``callback`` is invoked with the resulting value. Updates originate from
-        changes made in the ConfigDirector dashboard.
-
-        The callback runs on the SDK's background connection thread, not the thread that
-        registered it, so it should be quick and must be safe to call from another thread. An
-        exception raised by a callback is logged and does not affect other watchers.
-
-        Args:
-            config_key: The config key to watch.
-            default: The value referenced when config state is unavailable.
-            callback: Invoked with the newly evaluated value on every update to the config.
-            context: The user's context, used for targeting rule evaluation.
-
-        Returns:
-            A :class:`~configdirector.types.Subscription`. Call ``close()`` on it to stop
-            watching, or use it as a context manager to scope the watch to a block.
-
-        Raises:
-            ConfigDirectorValidationError: If ``config_key`` is empty.
-            ConfigDirectorTypeError: If ``default`` is ``None`` or an unsupported type, or if
-                ``callback`` is not callable.
-        """
         _validate_config_key(config_key)
         _validate_default(default)
         if not callable(callback):
@@ -506,16 +417,6 @@ class ConfigDirectorClient:
         return Subscription(lambda: self._remove_watcher(config_key, watcher))
 
     def unwatch(self, config_key: str, callback: WatchHandler[Any] | None = None) -> None:
-        """Stop watching ``config_key``.
-
-        Prefer closing the :class:`~configdirector.types.Subscription` returned by
-        :meth:`watch`; this is here for code that does not hold on to it.
-
-        Args:
-            config_key: The config key to remove watchers from.
-            callback: The callback to remove. When omitted, every watcher for ``config_key`` is
-                removed.
-        """
         with self._lock:
             watchers = self._watchers.get(config_key)
             if not watchers:
@@ -531,7 +432,6 @@ class ConfigDirectorClient:
                     return
 
     def unwatch_all(self) -> None:
-        """Stop watching every config key."""
         with self._lock:
             self._watchers.clear()
 
@@ -559,20 +459,6 @@ class ConfigDirectorClient:
     ) -> Subscription: ...
 
     def on(self, event: ClientEvent, handler: Callable[[Any], None]) -> Subscription:
-        """Register ``handler`` to be called whenever ``event`` is emitted.
-
-        Args:
-            event: One of ``"client_ready"``, ``"configs_updated"``, or ``"config_evaluated"``.
-            handler: Called with the event payload.
-
-        Returns:
-            A :class:`~configdirector.types.Subscription`. Call ``close()`` on it to unregister
-            the handler, or use it as a context manager.
-
-        Raises:
-            ConfigDirectorValidationError: If ``event`` is not a known event name.
-            ConfigDirectorTypeError: If ``handler`` is not callable.
-        """
         _validate_event_name(event)
         if not callable(handler):
             raise ConfigDirectorTypeError(
@@ -609,16 +495,6 @@ class ConfigDirectorClient:
     ) -> None: ...
 
     def off(self, event: ClientEvent, handler: Callable[[Any], None] | None = None) -> None:
-        """Unregister an event handler.
-
-        Args:
-            event: One of ``"client_ready"``, ``"configs_updated"``, or ``"config_evaluated"``.
-            handler: The handler to remove. When omitted, every handler for ``event`` is
-                removed.
-
-        Raises:
-            ConfigDirectorValidationError: If ``event`` is not a known event name.
-        """
         _validate_event_name(event)
         with self._lock:
             handlers = self._event_handlers[event]
@@ -654,12 +530,34 @@ def create_client(
     telemetry: TelemetryOptions | None = None,
     hooks: ClientHooks | None = None,
 ) -> ConfigDirectorClient:
-    """Create an uninitialized :class:`ConfigDirectorClient`.
+    """Create an uninitialized :class:`~configdirector.types.ConfigDirectorClient`.
 
-    Equivalent to constructing :class:`ConfigDirectorClient` directly; provided for consistency
-    with the other ConfigDirector SDKs. See :class:`ConfigDirectorClient` for the arguments.
+    The only supported way to build a client — the returned type is an interface, so it cannot
+    be instantiated. See :class:`~configdirector.types.ConfigDirectorClient` for what a client
+    does, and the arguments below for how to configure one.
+
+    Args:
+        server_sdk_key: Your ConfigDirector server SDK key. This is a secret value — do not
+            commit it to source control.
+        metadata: Metadata about your application. Supplying ``app_name`` and ``app_version`` is
+            recommended so that they can be referenced from targeting rules.
+        connection: Connection options such as mode, timeout, and polling interval.
+        logger: Any object implementing :class:`~configdirector.types.ConfigDirectorLogger`,
+            including a standard library :class:`logging.Logger`. Defaults to the standard
+            library logger named ``"configdirector"``, which your application configures like
+            any other logger.
+        log_level: A level to set on that default logger, as either a :mod:`logging` constant
+            or its name. A convenience for applications that do not otherwise configure
+            logging; when omitted, the SDK sets no level and the usual ``logging`` rules apply.
+            Ignored when ``logger`` is supplied.
+        telemetry: Telemetry queue and flush tuning.
+        hooks: Event handlers to attach before the client can emit any event.
+
+    Raises:
+        ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
+            ``connection.url`` is not a valid URL, or if a ``telemetry`` setting is out of range.
     """
-    return ConfigDirectorClient(
+    return _ConfigDirectorClient(
         server_sdk_key,
         metadata=metadata,
         connection=connection,

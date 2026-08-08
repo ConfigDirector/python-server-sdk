@@ -45,7 +45,7 @@ starts, share it for the whole lifetime of the process, and close it on shutdown
 
 ```python
 # configdirector_client.py — runs exactly once per process
-client = ConfigDirectorClient(os.environ["CONFIGDIRECTOR_SERVER_KEY"], ...)
+client = create_client(os.environ["CONFIGDIRECTOR_SERVER_KEY"], ...)
 client.initialize()
 atexit.register(client.close)
 ```
@@ -56,8 +56,8 @@ from configdirector_client import client
 ```
 
 Importing the module is what creates it: Python caches modules in `sys.modules`, so the code
-runs once no matter how many places import `client`. Never construct a `ConfigDirectorClient`
-inside a request handler — each one opens its own connection, blocks on `initialize()`, starts
+runs once no matter how many places import `client`. Never call `create_client()` inside a
+request handler — each client opens its own connection, blocks on `initialize()`, starts
 out not-ready (so it serves defaults), and drops its batched telemetry when it is discarded.
 
 Concurrency is not a reason to make more of them: the client is thread-safe, so every worker
@@ -89,7 +89,7 @@ lands in the application's logging namespace rather than the SDK's:
 sdk_logger = logging.getLogger("flask_sample.configdirector")
 sdk_logger.setLevel(os.environ.get("CONFIGDIRECTOR_LOG_LEVEL", "INFO"))
 
-client = ConfigDirectorClient(..., logger=sdk_logger)
+client = create_client(..., logger=sdk_logger)
 ```
 
 ```

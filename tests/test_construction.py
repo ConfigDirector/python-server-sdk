@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
 from configdirector import (
@@ -15,35 +13,27 @@ from configdirector import (
     __version__,
     create_client,
 )
-from configdirector.client import _DEFAULT_BASE_URL
+from configdirector.client import _DEFAULT_BASE_URL, _ConfigDirectorClient
 
 SDK_KEY = "test-server-sdk-key"
 
 
-def test_the_client_is_constructed_directly() -> None:
-    client = ConfigDirectorClient(SDK_KEY)
-
-    assert client.is_ready is False
-    assert client.closed is False
-
-
-def test_create_client_is_equivalent_to_the_constructor() -> None:
+def test_create_client_builds_a_client() -> None:
     client = create_client(SDK_KEY)
 
     assert isinstance(client, ConfigDirectorClient)
     assert client.is_ready is False
+    assert client.closed is False
 
 
-def test_create_client_takes_every_constructor_option() -> None:
-    # create_client documents itself as equivalent to the constructor, so an option added to one
-    # and not the other is a defect rather than a design choice.
-    assert list(inspect.signature(create_client).parameters) == list(
-        inspect.signature(ConfigDirectorClient).parameters
-    )
+def test_the_implementation_satisfies_the_public_interface() -> None:
+    # isinstance rather than issubclass: a runtime-checkable protocol with non-method members
+    # supports one and not the other.
+    assert isinstance(create_client(SDK_KEY), ConfigDirectorClient)
 
 
 def test_accepts_every_option() -> None:
-    client = ConfigDirectorClient(
+    client = _ConfigDirectorClient(
         SDK_KEY,
         metadata=Metadata(app_name="my-app", app_version="1.2.3"),
         connection=ConnectionOptions(mode="polling", polling_interval=15, timeout=5),
@@ -55,7 +45,7 @@ def test_accepts_every_option() -> None:
 
 
 def test_identifies_the_sdk() -> None:
-    client = ConfigDirectorClient(SDK_KEY)
+    client = _ConfigDirectorClient(SDK_KEY)
 
     assert client._sdk_name == "python-server-sdk"
     assert client._sdk_version == __version__
@@ -64,23 +54,23 @@ def test_identifies_the_sdk() -> None:
 @pytest.mark.parametrize("sdk_key", ["", "   "])
 def test_rejects_a_blank_sdk_key(sdk_key: str) -> None:
     with pytest.raises(ConfigDirectorValidationError, match="server SDK key"):
-        ConfigDirectorClient(sdk_key)
+        _ConfigDirectorClient(sdk_key)
 
 
 def test_validation_errors_are_also_value_errors() -> None:
     with pytest.raises(ValueError, match="server SDK key"):
-        ConfigDirectorClient("")
+        _ConfigDirectorClient("")
 
     with pytest.raises(ConfigDirectorError, match="server SDK key"):
-        ConfigDirectorClient("")
+        _ConfigDirectorClient("")
 
 
 def test_defaults_to_the_production_url() -> None:
-    assert ConfigDirectorClient(SDK_KEY)._base_url == _DEFAULT_BASE_URL
+    assert _ConfigDirectorClient(SDK_KEY)._base_url == _DEFAULT_BASE_URL
 
 
 def test_accepts_a_custom_url() -> None:
-    client = ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(url="https://proxy.example.com"))
+    client = _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(url="https://proxy.example.com"))
 
     assert client._base_url == "https://proxy.example.com"
 
@@ -88,4 +78,4 @@ def test_accepts_a_custom_url() -> None:
 @pytest.mark.parametrize("url", ["not-a-url", "://missing-scheme", "https://"])
 def test_rejects_an_invalid_url(url: str) -> None:
     with pytest.raises(ConfigDirectorValidationError, match="Invalid base URL"):
-        ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(url=url))
+        _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(url=url))

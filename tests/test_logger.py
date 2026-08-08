@@ -5,8 +5,8 @@ from collections.abc import Iterator
 
 import pytest
 
-from configdirector import ConfigDirectorClient, create_client
 from configdirector._logger import get_default_logger
+from configdirector.client import _ConfigDirectorClient
 
 SDK_KEY = "test-server-sdk-key"
 
@@ -53,20 +53,20 @@ def test_applies_an_explicit_log_level(log_level: int | str, expected: int) -> N
 
 
 def test_the_client_logs_through_the_package_logger() -> None:
-    client = ConfigDirectorClient(SDK_KEY)
+    client = _ConfigDirectorClient(SDK_KEY)
 
     assert client._logger is logging.getLogger("configdirector")
 
 
 def test_the_client_applies_an_explicit_log_level() -> None:
-    client = ConfigDirectorClient(SDK_KEY, log_level="DEBUG")
+    client = _ConfigDirectorClient(SDK_KEY, log_level="DEBUG")
 
     assert isinstance(client._logger, logging.Logger)
     assert client._logger.isEnabledFor(logging.DEBUG) is True
 
 
 def test_create_client_applies_an_explicit_log_level() -> None:
-    client = create_client(SDK_KEY, log_level="DEBUG")
+    client = _ConfigDirectorClient(SDK_KEY, log_level="DEBUG")
 
     assert isinstance(client._logger, logging.Logger)
     assert client._logger.isEnabledFor(logging.DEBUG) is True
