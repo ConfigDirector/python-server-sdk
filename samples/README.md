@@ -7,9 +7,15 @@ different web frameworks.
 |---|---|---|
 | [flask/](flask/) | [Flask](https://flask.palletsprojects.com/) | Minimal WSGI app: client lifecycle, per-request evaluation, SSR hydration |
 
-Each sample is an independent project with its own `pyproject.toml`. They depend on the SDK
-through a local path (`configdirector-server-sdk = { path = "../.." }`) so that they always run
-against the working copy in this repository rather than a published release.
+Each sample is an independent project with its own `pyproject.toml`, depending on the released
+`configdirector-server-sdk` from PyPI exactly as a real app would. They do not run against the
+working copy in this repository; to try a local change in a sample, add a temporary source
+override to that sample and remove it before committing:
+
+```toml
+[tool.uv.sources]
+configdirector-server-sdk = { path = "../..", editable = true }
+```
 
 To run one:
 

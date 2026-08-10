@@ -1,4 +1,4 @@
-.PHONY: install hooks lint format typecheck test coverage build verify-lock dist-check samples profile check check-all clean
+.PHONY: install hooks lint format typecheck test coverage build verify-lock dist-check samples samples-local profile check check-all clean
 
 install:
 	uv sync --all-extras
@@ -50,12 +50,30 @@ dist-check: build
 			"import configdirector; print('wheel imports cleanly:', configdirector.__version__)"; \
 	status=$$?; rm -rf "$$tmp"; exit $$status
 
-# Samples resolve the SDK by local path, so this is what catches a breaking API change.
+# Samples resolve the SDK from PyPI, so this checks the published release against the sample
+# code -- it does NOT exercise the working tree, and will not catch a breaking API change here.
 samples:
 	@for sample in samples/*/; do \
 		[ -f "$$sample/pyproject.toml" ] || continue; \
 		printf '\n\033[1m==> sample %s\033[0m\n' "$$(basename $$sample)"; \
 		(cd "$$sample" && uv sync --quiet && uv run mypy && uv run pytest) || exit 1; \
+	done
+
+# Companion to `samples`: the same apps, resolved against the SDK in this working tree instead
+# of the released wheel. `samples` proves the published release still works with the sample code;
+# this proves an unreleased API change has not broken it. Without this target a breaking change
+# passes every check, because the samples pin a version from PyPI.
+#
+# uv sync installs the pinned release, then the editable install replaces it in the same
+# environment, and --no-sync stops uv from undoing that before the checks run. The override is
+# not written to any file, so nothing here can be committed by accident; the next plain
+# `make samples` restores the released version.
+samples-local:
+	@for sample in samples/*/; do \
+		[ -f "$$sample/pyproject.toml" ] || continue; \
+		printf '\n\033[1m==> sample %s (working-tree SDK)\033[0m\n' "$$(basename $$sample)"; \
+		(cd "$$sample" && uv sync --quiet && uv pip install --quiet -e ../.. \
+			&& uv run --no-sync mypy && uv run --no-sync pytest) || exit 1; \
 	done
 
 # Exploratory load profile of the Flask sample: see profiling/README.md. Deliberately not part
@@ -69,7 +87,7 @@ profile:
 check: lint typecheck test
 
 # Everything CI runs. The pre-push hook calls this.
-check-all: verify-lock lint typecheck test dist-check samples
+check-all: verify-lock lint typecheck test dist-check samples samples-local
 	@printf '\n\033[1m✓ all checks passed\033[0m\n'
 
 clean:

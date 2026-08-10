@@ -91,5 +91,9 @@ jobs:
         with:
           enable-cache: true
 
-      # Each sample resolves the SDK by local path, so it is not locked against a release.
+      # Each sample pins a released SDK from PyPI, so this checks the published wheel.
       - run: make samples
+
+      # And again against this working tree, which is what catches a breaking API change before
+      # it ships. Both matter: the first can fail on a bad release, the second on a bad commit.
+      - run: make samples-local

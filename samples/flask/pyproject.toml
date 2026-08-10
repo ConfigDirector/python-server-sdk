@@ -4,7 +4,9 @@ version = "0.0.0"
 description = "Flask sample app for the ConfigDirector Python server SDK"
 requires-python = ">=3.10"
 dependencies = [
-  "configdirector-server-sdk",
+  # Resolved from PyPI, like any consuming app would. The SDK is pre-1.0, so a 0.x minor is
+  # allowed to break: cap the range rather than tracking the newest release blindly.
+  "configdirector-server-sdk>=0.2,<0.3",
   "flask>=3.1",
   "python-dotenv>=1.0",
 ]
@@ -15,10 +17,6 @@ dev = ["mypy>=1.14", "pytest>=8.3"]
 [tool.uv]
 # A runnable app, not a distributable package: install the dependencies, not this project.
 package = false
-
-[tool.uv.sources]
-# Always run against the SDK in this repository rather than a published release.
-configdirector-server-sdk = { path = "../..", editable = true }
 
 [tool.ruff]
 # Inherit the SDK's style, but resolve first-party imports against this directory so that
