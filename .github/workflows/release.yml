@@ -1,4 +1,4 @@
-name: Release (TestPyPI)
+name: Release
 
 on:
   workflow_dispatch:
@@ -6,22 +6,15 @@ on:
 permissions:
   contents: read
 
-# Matches ci.yml: bash everywhere keeps the make recipes portable across the runner images.
 defaults:
   run:
     shell: bash
 
 jobs:
-  release:
-    name: Publish to TestPyPI
+  build:
+    name: Build distribution
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
-      # OIDC token for PyPI trusted publishing, scoped to this job so nothing else in the
-      # workflow can mint one. Job-level permissions replace the workflow-level block outright,
-      # so contents: read has to be repeated here for the checkout.
-      id-token: write
     steps:
       - uses: actions/checkout@v5
 
@@ -30,18 +23,45 @@ jobs:
         with:
           enable-cache: true
 
-      # The same target CI and the pre-push hook run, so the release path cannot drift from the
-      # checks: it builds into dist/, validates the metadata with twine, and imports the wheel in
-      # a throwaway environment. It leaves dist/ in place, which is what gets published below.
       - run: make dist-check
 
-      # No username, password or token: the TestPyPI trusted publisher is matched on this
-      # repository and on this workflow's filename, so renaming this file breaks publishing.
-      #
-      # Deliberately no skip-existing. A version already present on the index should fail the run
-      # loudly rather than pass as a no-op, because neither index allows a version to be
-      # re-uploaded once taken -- the fix is always a new version, never a retry.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    name: Publish to PyPI
+    needs: testpypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
