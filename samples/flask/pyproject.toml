@@ -4,9 +4,7 @@ version = "0.0.0"
 description = "Flask sample app for the ConfigDirector Python server SDK"
 requires-python = ">=3.10"
 dependencies = [
-  # Resolved from PyPI, like any consuming app would. The SDK is pre-1.0, so a 0.x minor is
-  # allowed to break: cap the range rather than tracking the newest release blindly.
-  "configdirector-server-sdk>=0.2,<0.3",
+  "configdirector-server-sdk>=0.3",
   "flask>=3.1",
   "python-dotenv>=1.0",
 ]
