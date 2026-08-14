@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from .._http import HttpClient
 from .._transport.base import REQUEST_HEADERS, is_fatal_status, resolve
+from .._version import SdkIdentity
 from ..errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 from ..types import ConfigDirectorLogger, Context
 from .queue import AggregatedEvent
@@ -60,11 +61,13 @@ class HttpEventReporter:
         *,
         server_sdk_key: str,
         base_url: str,
+        sdk_identity: SdkIdentity,
         logger: ConfigDirectorLogger,
         http: HttpClient,
         timeout: float = REQUEST_TIMEOUT,
     ) -> None:
         self._server_sdk_key = server_sdk_key
+        self._sdk_identity = sdk_identity
         self._http = http
         self._url = resolve(base_url, _PATH)
         self._logger = logger
@@ -85,6 +88,10 @@ class HttpEventReporter:
     def _payload(self, report: EventReport) -> dict[str, Any]:
         return {
             "serverSdkKey": self._server_sdk_key,
+            "metaContext": {
+                "sdkName": self._sdk_identity.sdk_name,
+                "sdkVersion": self._sdk_identity.sdk_version,
+            },
             "discreteEvents": {
                 "capturedContexts": [_context_to_wire(context) for context in report.contexts]
             },

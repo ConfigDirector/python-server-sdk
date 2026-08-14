@@ -15,6 +15,7 @@ from configdirector._telemetry import reporter as reporter_module
 from configdirector._telemetry.events import EvaluatedConfigEvent
 from configdirector._telemetry.queue import AggregatedEvent
 from configdirector._telemetry.reporter import EventReport, HttpEventReporter
+from configdirector._version import SdkIdentity
 from configdirector.errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 from configdirector.types import Context
 from tests.helpers import RecordingLogger
@@ -69,7 +70,11 @@ def logger() -> RecordingLogger:
 @pytest.fixture
 def reporter(logger: RecordingLogger, http: StubHttp) -> HttpEventReporter:
     return HttpEventReporter(
-        server_sdk_key="sdk-key", base_url=BASE_URL, logger=logger, http=cast(HttpClient, http)
+        server_sdk_key="sdk-key",
+        base_url=BASE_URL,
+        sdk_identity=SdkIdentity(sdk_name="telemetry-tests", sdk_version="1.2.3"),
+        logger=logger,
+        http=cast(HttpClient, http),
     )
 
 
@@ -109,6 +114,7 @@ class TestRequest:
         proxied = HttpEventReporter(
             server_sdk_key="sdk-key",
             base_url="https://proxy.example.com/configdirector",
+            sdk_identity=SdkIdentity(sdk_name="tests", sdk_version="1.2.3"),
             logger=logger,
             http=cast(HttpClient, http),
         )
@@ -137,6 +143,12 @@ class TestPayload:
         reporter.report(report(event()))
 
         assert http.payload["serverSdkKey"] == "sdk-key"
+
+    def test_sends_the_sdk_name_and_version(self, reporter: HttpEventReporter, http: StubHttp) -> None:
+        reporter.report(report(event()))
+
+        assert http.payload["metaContext"]["sdkName"] == "telemetry-tests"
+        assert http.payload["metaContext"]["sdkVersion"] == "1.2.3"
 
     def test_sends_each_aggregated_evaluation_with_its_window_and_count(
         self, reporter: HttpEventReporter, http: StubHttp

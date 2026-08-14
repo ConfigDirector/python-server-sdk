@@ -22,6 +22,7 @@ from configdirector import (
 )
 from configdirector._telemetry import TelemetryCollector
 from configdirector._telemetry.value_id import VALUE_ID_LENGTH, generate_value_id
+from configdirector._version import _SDK_NAME, SdkIdentity, __version__
 from configdirector.client import _ConfigDirectorClient
 from tests.helpers import (
     RecordedEvaluation,
@@ -825,6 +826,11 @@ class TestTelemetry:
         assert options.base_url == "https://proxy.example.com"
         assert options.event_queue_limit == 250
         assert options.flush_interval == 10.0
+
+    def test_the_collector_reports_under_the_sdk_identity(self, telemetry: TelemetryRecorder) -> None:
+        _ConfigDirectorClient(SDK_KEY)
+
+        assert telemetry.last.options.sdk_identity == SdkIdentity(sdk_name=_SDK_NAME, sdk_version=__version__)
 
     def test_closing_the_client_closes_the_collector(
         self, ready_client: _ConfigDirectorClient, telemetry: TelemetryRecorder

@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, field
 
 from .._http import HttpClient
+from .._version import SdkIdentity
 from ..types import ConfigDirectorLogger, ConfigType, ConfigValue, Context, EvaluationReason
 from .events import EvaluatedConfigEvent
 from .queue import ContextRegistry, EventQueue, aggregate
@@ -41,6 +42,7 @@ _EVALUATION_SHARE = 7
 class TelemetryCollectorOptions:
     server_sdk_key: str
     base_url: str
+    sdk_identity: SdkIdentity
     logger: ConfigDirectorLogger
     # Owned by the client and shared with the transport. Unused when `reporter` is supplied.
     http: HttpClient = field(default_factory=HttpClient)
@@ -59,6 +61,7 @@ class TelemetryCollector:
         self._reporter = options.reporter or HttpEventReporter(
             server_sdk_key=options.server_sdk_key,
             base_url=options.base_url,
+            sdk_identity=options.sdk_identity,
             logger=options.logger,
             http=options.http,
         )

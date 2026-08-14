@@ -23,7 +23,7 @@ from ._telemetry import (
 )
 from ._transport import TransportOptions, create_transport
 from ._value_parser import parse_config_value
-from ._version import _SDK_NAME, __version__
+from ._version import _SDK_NAME, SdkIdentity, __version__
 from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
 from .types import (
     ClientEvent,
@@ -159,6 +159,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             TelemetryCollectorOptions(
                 server_sdk_key=server_sdk_key,
                 base_url=self._base_url,
+                sdk_identity=SdkIdentity(sdk_name=self._sdk_name, sdk_version=self._sdk_version),
                 logger=self._logger,
                 http=self._http,
                 event_queue_limit=self._telemetry_options.event_queue_limit,

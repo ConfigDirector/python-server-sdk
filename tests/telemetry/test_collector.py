@@ -7,6 +7,7 @@ import pytest
 
 from configdirector._telemetry.collector import TelemetryCollector, TelemetryCollectorOptions
 from configdirector._telemetry.reporter import EventReport, ReporterResponse
+from configdirector._version import SdkIdentity
 from configdirector.types import Context
 from tests.helpers import RecordingLogger, wait_for
 
@@ -60,6 +61,7 @@ def make_collector(reporter: FakeReporter, logger: RecordingLogger) -> Iterator[
         options: dict[str, object] = {
             "server_sdk_key": "sdk-key",
             "base_url": "https://server-sdk-api.configdirector.com",
+            "sdk_identity": SdkIdentity(sdk_name="telemetry-tests", sdk_version="1.2.3"),
             "logger": logger,
             "flush_interval": NEVER,
             "initial_flush_delay": NEVER,
