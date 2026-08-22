@@ -98,8 +98,11 @@ class ConfigEvaluator:
 
         bucket: Percentage | None = None
         total = 0.0
+        # A bucket spans [total, total + percentage). Strict, so a context landing exactly on a
+        # boundary belongs to the bucket that starts there -- which is what keeps a 0% bucket
+        # unreachable and each bucket's share exact. See SEMANTICS.md 7.1.
         for percentage in percentages:
-            if assigned <= percentage.percentage + total:
+            if assigned < percentage.percentage + total:
                 bucket = percentage
                 break
             total += percentage.percentage

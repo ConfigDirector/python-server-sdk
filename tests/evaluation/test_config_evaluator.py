@@ -86,6 +86,33 @@ class TestPercentageRules:
         assert evaluator.evaluate(config, ctx(id="15")).value == "Group A"
         assert evaluator.evaluate(config, ctx(id="20")).value == "Group B"
 
+    # A bucket spans [start, end), so a 0% bucket is empty and unreachable no matter who asks.
+    # With an inclusive boundary it would take one of the 1000 reachable hash values, and a
+    # variation turned down to 0% would still serve roughly 0.1% of traffic.
+    def test_a_zero_percent_bucket_is_unreachable_for_every_identifier(self) -> None:
+        config = Config(
+            id=CONFIG_ID,
+            key="config-without-rules",
+            type="string",
+            variations=[],
+            target=TargetingRules(
+                default_value="this-is-the-default",
+                rules=[
+                    PercentageRule(
+                        id=uid(),
+                        order=0,
+                        percentages=[
+                            Percentage(value="never", percentage=0, id=uid()),
+                            Percentage(value="always", percentage=100, id=uid()),
+                        ],
+                    )
+                ],
+            ),
+        )
+
+        for i in range(4_000):
+            assert evaluator.evaluate(config, ctx(id=f"user-{i}")).value == "always"
+
     def test_falls_back_to_the_default_when_percentages_do_not_add_up_to_100(self) -> None:
         config = Config(
             id=CONFIG_ID,
