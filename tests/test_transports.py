@@ -327,6 +327,11 @@ class TestOneTimeTransport:
         assert transport.is_connected is False
 
 
+# What the server promises: axum's KeepAlive::default() sends a comment every 15 seconds, so a
+# stream silent for meaningfully longer than that is not idle, it is broken.
+_SERVER_KEEPALIVE = 15.0
+
+
 class TestStreamingTransport:
     def test_posts_the_sdk_key_to_the_sse_endpoint(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
@@ -448,6 +453,39 @@ class TestStreamingTransport:
             transport.close()
 
         assert sink.keys == [["greeting"]]
+
+    def test_a_silent_stream_is_given_up_on_and_reconnected(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        release = threading.Event()
+
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            sse_headers(request)
+            request.wfile.write(f"data: {bundle_json('greeting')}\n\n".encode())
+            request.wfile.flush()
+            # And then nothing: no events, no keepalive comments, and no close either. Only a
+            # clock can tell this apart from a stream that simply has nothing to say.
+            release.wait(10)
+
+        server = serve(handle)
+        transport = StreamingTransport(options(server.url, sink, logger), read_timeout=0.3)
+
+        try:
+            transport.connect(5.0)
+            assert wait_for(lambda: len(server.requests) > 1, timeout=10)
+        finally:
+            release.set()
+            transport.close()
+
+    def test_the_default_read_timeout_outlasts_a_missed_keepalive_or_two(
+        self, sink: Sink, logger: RecordingLogger
+    ) -> None:
+        transport = StreamingTransport(options("https://api.test/", sink, logger))
+
+        # None would mean waiting forever for the next byte, which is how a half-open connection
+        # goes unnoticed.
+        assert transport.read_timeout is not None
+        assert transport.read_timeout > _SERVER_KEEPALIVE * 2
 
     def test_close_stops_the_stream(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger

@@ -24,12 +24,21 @@ _MAX_BACKOFF_EXPONENT = 9
 # Past this many attempts a reconnect is no longer routine and deserves a louder log level.
 _QUIET_ATTEMPTS = 5
 
+# The server keeps the stream alive with a comment every 15 seconds, so silence for three of
+# those in a row is not an idle stream, it is a dead one -- typically a connection an idle
+# timeout somewhere in the middle dropped without telling either end. Waiting indefinitely
+# instead, which is what None would mean, leaves the SDK reading from a socket that will never
+# produce another byte and serving whatever config it last received.
+_READ_TIMEOUT = 45.0
+
 
 class StreamingTransport:
-    def __init__(self, options: TransportOptions) -> None:
+    def __init__(self, options: TransportOptions, read_timeout: float | None = _READ_TIMEOUT) -> None:
         self._options = options
         self._logger = options.logger
         self._url = resolve(options.base_url, _PATH)
+        # Injectable so a test can stall a stream out in milliseconds rather than in minutes.
+        self._read_timeout = read_timeout
         self._client: EventSourceClient | None = None
         self._settled = threading.Event()
         self._fatal_error: ConfigDirectorConnectionError | None = None
@@ -50,7 +59,9 @@ class StreamingTransport:
                 }
             ),
             logger=self._logger,
+            read_timeout=self._read_timeout,
             on_message=self._on_message,
+            on_error=self._on_error,
             on_connect=self._on_connect,
             on_disconnect=self._on_disconnect,
             should_reconnect=self._should_reconnect,
@@ -64,6 +75,10 @@ class StreamingTransport:
         self._settled.wait(timeout)
         if self._fatal_error is not None:
             raise self._fatal_error
+
+    @property
+    def read_timeout(self) -> float | None:
+        return self._read_timeout
 
     @property
     def is_connected(self) -> bool:
@@ -83,6 +98,12 @@ class StreamingTransport:
 
     def _on_disconnect(self) -> None:
         self._logger.debug("[StreamingTransport] Disconnected")
+
+    def _on_error(self, error: BaseException) -> None:
+        # Says why the stream dropped. The reconnect it causes is logged on its own, at a level
+        # that reflects how many have gone by; this is the detail behind it, and a stalled
+        # stream has no other way of announcing itself.
+        self._logger.debug("[StreamingTransport] The stream failed: %r", error)
 
     def _on_message(self, message: EventSourceMessage) -> None:
         try:
