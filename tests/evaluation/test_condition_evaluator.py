@@ -178,70 +178,6 @@ class TestTextComparisonConditions:
         assert evaluate_condition(condition, ctx(id="23C")) is False
         assert evaluate_condition(condition, ctx(id="F")) is False
 
-    def test_evaluates_identifier_matches_regex(self) -> None:
-        condition = Condition(
-            id="a",
-            attribute="identifier",
-            trait=None,
-            operator="matches regex",
-            target_type="text",
-            target_values=["[A-Z]"],
-        )
-
-        assert evaluate_condition(condition, ctx(id="ALEJANDRO")) is True
-        assert evaluate_condition(condition, ctx(id="B")) is True
-        assert evaluate_condition(condition, ctx(id="123456")) is False
-        assert evaluate_condition(condition, ctx(id=".")) is False
-        assert evaluate_condition(condition, ctx()) is False
-
-    def test_evaluates_identifier_matches_regex_with_invalid_regex(self) -> None:
-        condition = Condition(
-            id="a",
-            attribute="identifier",
-            trait=None,
-            operator="matches regex",
-            target_type="text",
-            target_values=["["],
-        )
-
-        assert evaluate_condition(condition, ctx(id="ALEJANDRO")) is False
-        assert evaluate_condition(condition, ctx(id="B")) is False
-        assert evaluate_condition(condition, ctx(id="123456")) is False
-        assert evaluate_condition(condition, ctx(id=".")) is False
-
-    @pytest.mark.parametrize("operator", ["does NOT match regex", "does not match regex"])
-    def test_evaluates_identifier_does_not_match_regex(self, operator: str) -> None:
-        condition = Condition(
-            id="a",
-            attribute="identifier",
-            trait=None,
-            operator=operator,
-            target_type="text",
-            target_values=["[A-Z]"],
-        )
-
-        assert evaluate_condition(condition, ctx(id="123456")) is True
-        assert evaluate_condition(condition, ctx(id=".")) is True
-        assert evaluate_condition(condition, ctx()) is True
-        assert evaluate_condition(condition, ctx(id="ALEJANDRO")) is False
-        assert evaluate_condition(condition, ctx(id="B")) is False
-
-    @pytest.mark.parametrize("operator", ["does NOT match regex", "does not match regex"])
-    def test_evaluates_identifier_does_not_match_regex_with_invalid_regex(self, operator: str) -> None:
-        condition = Condition(
-            id="a",
-            attribute="identifier",
-            trait=None,
-            operator=operator,
-            target_type="text",
-            target_values=["["],
-        )
-
-        assert evaluate_condition(condition, ctx(id="ALEJANDRO")) is True
-        assert evaluate_condition(condition, ctx(id="B")) is True
-        assert evaluate_condition(condition, ctx(id="123456")) is True
-        assert evaluate_condition(condition, ctx(id=".")) is True
-
     @pytest.mark.parametrize("operator", ["equals", "="])
     def test_evaluates_name_equals(self, operator: str) -> None:
         condition = Condition(
@@ -307,6 +243,18 @@ class TestTextComparisonConditions:
         assert evaluate_condition(condition, traits({"city": "Portland"})) is False
         assert evaluate_condition(condition, traits({})) is False
 
+    class TestRetiredOperators:
+        """the regex operators were removed; they are now unknown operators and never match."""
+
+        @pytest.mark.parametrize("operator", ["matches regex", "does NOT match regex"])
+        @pytest.mark.parametrize("pattern", ["[A-Z]", "^ALEJ", ".*", "["])
+        def test_the_regex_operators_no_longer_match(self, operator: str, pattern: str) -> None:
+            c = condition(operator, [pattern])
+
+            assert evaluate_condition(c, ctx(id="ALEJANDRO")) is False
+            assert evaluate_condition(c, ctx(id="123456")) is False
+            assert evaluate_condition(c, EvaluationContext()) is False
+
     class TestAbsentValuesAreComparedAsEmptyText:
         """a missing attribute resolves to "", it is not a special case per operator."""
 
@@ -321,16 +269,6 @@ class TestTextComparisonConditions:
 
         def test_starts_with_empty_string_matches(self) -> None:
             assert evaluate_condition(condition("starts with any of", [""]), EvaluationContext()) is True
-
-        @pytest.mark.parametrize("pattern", ["^u", "undefined", "[a-z]", ".+"])
-        def test_a_regex_no_longer_matches_the_word_undefined(self, pattern: str) -> None:
-            # The JavaScript SDK used to test the literal text "undefined" here, because it reached
-            # the comparison through `value?.toString()`.
-            assert evaluate_condition(condition("matches regex", [pattern]), EvaluationContext()) is False
-
-        @pytest.mark.parametrize("pattern", ["^$", ".*"])
-        def test_a_regex_matching_the_empty_string_does_match(self, pattern: str) -> None:
-            assert evaluate_condition(condition("matches regex", [pattern]), EvaluationContext()) is True
 
         def test_a_missing_trait_behaves_the_same_as_a_missing_identifier(self) -> None:
             c = condition("=", [""], attribute="traits", trait="/x")
@@ -812,7 +750,7 @@ class TestEdgeCases:
 
         @pytest.mark.parametrize(
             "operator",
-            ["is one of", "starts with any of", "ends with any of", "=", "!=", "matches regex"],
+            ["is one of", "starts with any of", "ends with any of", "=", "!="],
         )
         def test_every_other_text_operator_is_false(self, operator: str) -> None:
             assert evaluate_condition(condition(operator, []), ctx(id="abc")) is False

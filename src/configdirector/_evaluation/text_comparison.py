@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 __all__ = ["compare_text"]
 
 
@@ -25,16 +23,5 @@ def compare_text(value: str, operator: str, target_values: list[str]) -> bool:
             return any(value.endswith(target) for target in target_values)
         case "does not end with any of":
             return not any(value.endswith(target) for target in target_values)
-        case "matches regex":
-            return first is not None and _matches_regex(first, value)
-        case "does not match regex":
-            return first is not None and not _matches_regex(first, value)
         case _:
             return False
-
-
-def _matches_regex(pattern: str, value: str) -> bool:
-    try:
-        return re.search(pattern, value) is not None
-    except re.error:
-        return False

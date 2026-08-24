@@ -36,8 +36,6 @@ TEXT_OPERATORS = (
     "does NOT start with any of",
     "ends with any of",
     "does NOT end with any of",
-    "matches regex",
-    "does NOT match regex",
 )
 NUMBER_OPERATORS = ("=", "!=", ">", ">=", "<", "<=")
 SEMVER_OPERATORS = ("is one of", "is NOT one of", ">", ">=", "<", "<=")
