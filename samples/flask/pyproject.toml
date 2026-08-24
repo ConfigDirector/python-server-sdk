@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Flask sample app for the ConfigDirector Python server SDK"
 requires-python = ">=3.10"
 dependencies = [
-  "configdirector-server-sdk>=0.3",
+  "configdirector-server-sdk>=1.0",
   "flask>=3.1",
   "python-dotenv>=1.0",
 ]
