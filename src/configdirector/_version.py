@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 _SDK_NAME = "python-server-sdk"
 
