@@ -541,6 +541,66 @@ class TestStreamingTransport:
         assert transport.read_timeout is not None
         assert transport.read_timeout > _SERVER_KEEPALIVE * 2
 
+    def test_sends_a_heartbeat_with_the_current_session_id(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        release = threading.Event()
+
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            if request.path.endswith("/server/heartbeat/v1"):
+                respond(request, 204)
+                return
+            sse_headers(request)
+            request.wfile.write(f"data: {bundle_json('greeting')}\n\n".encode())
+            request.wfile.flush()
+            release.wait(10)
+
+        server = serve(handle)
+        transport = StreamingTransport(options(server.url, sink, logger), heartbeat_interval=0.05)
+
+        try:
+            transport.connect(5.0)
+            assert wait_for(lambda: "/server/heartbeat/v1" in server.paths)
+        finally:
+            release.set()
+            transport.close()
+
+        heartbeat = server.requests[server.paths.index("/server/heartbeat/v1")]
+        assert heartbeat["serverSdkKey"] == "sdk-key"
+        assert heartbeat["sessionId"] == server.requests[0]["sessionId"]
+
+    def test_close_stops_the_heartbeat(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        release = threading.Event()
+
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            if request.path.endswith("/server/heartbeat/v1"):
+                respond(request, 204)
+                return
+            sse_headers(request)
+            request.wfile.write(f"data: {bundle_json('greeting')}\n\n".encode())
+            request.wfile.flush()
+            release.wait(10)
+
+        server = serve(handle)
+        transport = StreamingTransport(options(server.url, sink, logger), heartbeat_interval=0.05)
+
+        try:
+            transport.connect(5.0)
+            assert wait_for(lambda: "/server/heartbeat/v1" in server.paths)
+        finally:
+            release.set()
+            transport.close()
+
+        settled = len(server.paths)
+        assert wait_for(lambda: len(server.paths) > settled, timeout=0.3) is False
+
+    def test_the_default_heartbeat_interval_is_90_seconds(self, sink: Sink, logger: RecordingLogger) -> None:
+        transport = StreamingTransport(options("https://api.test/", sink, logger))
+
+        assert transport.heartbeat_interval == 90.0
+
     def test_close_stops_the_stream(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
     ) -> None:
