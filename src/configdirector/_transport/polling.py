@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from dataclasses import replace
 from typing import NoReturn
 
@@ -31,6 +32,7 @@ class PollingTransport:
         self._url = resolve(options.base_url, _PATH)
         self._interval = max(options.polling_interval, 0.0)
         self._last_update_timestamp: str | None = None
+        self._session_id = str(uuid.uuid4())
         self._fatal = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -50,6 +52,10 @@ class PollingTransport:
     def is_connected(self) -> bool:
         thread = self._thread
         return thread is not None and thread.is_alive()
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
 
     def close(self) -> None:
         with self._lock:
@@ -127,6 +133,7 @@ class PollingTransport:
                 "serverSdkKey": self._options.server_sdk_key,
                 "metaContext": self._options.meta_context,
                 "lastUpdateTimestamp": last_update_timestamp,
+                "sessionId": self._session_id,
             }
         )
         try:

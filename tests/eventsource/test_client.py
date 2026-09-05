@@ -133,6 +133,24 @@ class TestRequestConfiguration:
         assert transport.requests[0].method == "POST"
         assert transport.requests[0].body == b'{"key":"value"}'
 
+    def test_calls_a_body_callable_for_each_attempt(self, clients: list[EventSourceClient]) -> None:
+        transport = FakeTransport(FakeResponse(chunks=sse("data: hi\n\n")))
+        bodies = iter([b"attempt-1", b"attempt-2"])
+        client = build(
+            clients,
+            transport=transport,
+            method="POST",
+            body=lambda: next(bodies),
+            calculate_reconnect_delay=lambda state: 0.001,
+            should_reconnect=lambda state: transport.attempts < 2,
+        )
+
+        client.connect()
+        assert wait_for(lambda: transport.attempts >= 2)
+
+        assert transport.requests[0].body == b"attempt-1"
+        assert transport.requests[1].body == b"attempt-2"
+
 
 class TestHandlers:
     def test_calls_on_connect_when_the_stream_opens(self, clients: list[EventSourceClient]) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.server
 import json
 import threading
+import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -201,6 +202,34 @@ class TestPollingTransport:
 
         assert server.requests[1]["lastUpdateTimestamp"] == "2024-01-01T00:00:00.000Z"
 
+    def test_sends_a_uuid_session_id(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        server = serve(lambda request: respond(request, 200, bundle_json("greeting")))
+        transport = PollingTransport(options(server.url, sink, logger))
+
+        try:
+            transport.connect(5.0)
+        finally:
+            transport.close()
+
+        session_id = server.requests[0]["sessionId"]
+        assert str(uuid.UUID(session_id)) == session_id
+
+    def test_sends_the_same_session_id_on_every_poll(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        server = serve(lambda request: respond(request, 200, bundle_json("greeting")))
+        transport = PollingTransport(options(server.url, sink, logger, polling_interval=0.02))
+
+        try:
+            transport.connect(5.0)
+            assert wait_for(lambda: len(server.requests) >= 2)
+        finally:
+            transport.close()
+
+        assert server.requests[1]["sessionId"] == server.requests[0]["sessionId"]
+
     def test_keeps_polling_on_the_interval(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
     ) -> None:
@@ -394,6 +423,49 @@ class TestStreamingTransport:
             transport.close()
 
         assert sink.keys == [["first"], ["second"]]
+
+    def test_sends_a_uuid_session_id(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            sse_headers(request)
+            request.wfile.write(f"data: {bundle_json('greeting')}\n\n".encode())
+            request.wfile.flush()
+
+        server = serve(handle)
+        transport = StreamingTransport(options(server.url, sink, logger))
+
+        try:
+            transport.connect(5.0)
+            assert wait_for(lambda: len(sink.bundles) == 1)
+        finally:
+            transport.close()
+
+        session_id = server.requests[0]["sessionId"]
+        assert str(uuid.UUID(session_id)) == session_id
+
+    def test_generates_a_new_session_id_on_each_reconnect(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        release = threading.Event()
+
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            sse_headers(request)
+            request.wfile.write(f"data: {bundle_json('greeting')}\n\n".encode())
+            request.wfile.flush()
+            release.wait(10)
+
+        server = serve(handle)
+        transport = StreamingTransport(options(server.url, sink, logger), read_timeout=0.3)
+
+        try:
+            transport.connect(5.0)
+            assert wait_for(lambda: len(server.requests) > 1, timeout=10)
+        finally:
+            release.set()
+            transport.close()
+
+        assert server.requests[1]["sessionId"] != server.requests[0]["sessionId"]
 
     def test_a_malformed_message_is_logged_and_skipped(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 
 from .._bundle import parse_bundle
 from .._eventsource import EventSourceClient, EventSourceMessage, ReadyState, ReconnectionState
@@ -42,6 +43,7 @@ class StreamingTransport:
         self._client: EventSourceClient | None = None
         self._settled = threading.Event()
         self._fatal_error: ConfigDirectorConnectionError | None = None
+        self._session_id: str | None = None
 
     def connect(self, timeout: float) -> None:
         self.close()
@@ -52,12 +54,7 @@ class StreamingTransport:
             self._url,
             method="POST",
             headers=REQUEST_HEADERS,
-            body=json_body(
-                {
-                    "serverSdkKey": self._options.server_sdk_key,
-                    "metaContext": self._options.meta_context,
-                }
-            ),
+            body=self._build_request_body,
             logger=self._logger,
             read_timeout=self._read_timeout,
             on_message=self._on_message,
@@ -79,6 +76,20 @@ class StreamingTransport:
     @property
     def read_timeout(self) -> float | None:
         return self._read_timeout
+
+    @property
+    def session_id(self) -> str | None:
+        return self._session_id
+
+    def _build_request_body(self) -> bytes:
+        self._session_id = str(uuid.uuid4())
+        return json_body(
+            {
+                "serverSdkKey": self._options.server_sdk_key,
+                "metaContext": self._options.meta_context,
+                "sessionId": self._session_id,
+            }
+        )
 
     @property
     def is_connected(self) -> bool:
