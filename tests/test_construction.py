@@ -36,7 +36,7 @@ def test_accepts_every_option() -> None:
     client = _ConfigDirectorClient(
         SDK_KEY,
         metadata=Metadata(app_name="my-app", app_version="1.2.3"),
-        connection=ConnectionOptions(mode="polling", polling_interval=15, timeout=5),
+        connection=ConnectionOptions(mode="polling", polling_interval=90, timeout=5),
         telemetry=TelemetryOptions(event_queue_limit=100, flush_interval=10),
         hooks=ClientHooks(client_ready=lambda _event: None),
     )

@@ -1,9 +1,11 @@
 from ..types import ConnectionMode
-from .base import Transport, TransportOptions
+from .base import DEFAULT_POLLING_INTERVAL, MIN_POLLING_INTERVAL, Transport, TransportOptions
 from .polling import PollingTransport
 from .streaming import StreamingTransport
 
 __all__ = [
+    "DEFAULT_POLLING_INTERVAL",
+    "MIN_POLLING_INTERVAL",
     "PollingTransport",
     "StreamingTransport",
     "Transport",

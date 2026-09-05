@@ -732,15 +732,41 @@ class TestConnectionOptions:
         assert transports.last.mode == mode
 
     def test_passes_the_polling_interval_to_the_transport(self, transports: TransportRecorder) -> None:
-        _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=15))
+        _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=90))
 
-        assert transports.last.options.polling_interval == 15
+        assert transports.last.options.polling_interval == 90
+
+    def test_defaults_the_polling_interval_to_5_minutes(self, transports: TransportRecorder) -> None:
+        _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode="polling"))
+
+        assert transports.last.options.polling_interval == 300.0
+
+    @pytest.mark.parametrize("interval", [-1.0, 0, 59.9])
+    def test_rejects_a_polling_interval_below_60_seconds(self, interval: float) -> None:
+        with pytest.raises(ConfigDirectorValidationError, match="polling interval"):
+            _ConfigDirectorClient(
+                SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=interval)
+            )
+
+    @pytest.mark.parametrize("interval", [60, 60.0, 300, 3_600.5])
+    def test_accepts_a_polling_interval_of_at_least_60_seconds(
+        self, interval: float, transports: TransportRecorder
+    ) -> None:
+        _ConfigDirectorClient(
+            SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=interval)
+        )
+
+        assert transports.last.options.polling_interval == interval
+
+    def test_rejects_an_invalid_polling_interval_even_when_streaming(self) -> None:
+        with pytest.raises(ConfigDirectorValidationError, match="polling interval"):
+            _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode="streaming", polling_interval=1))
 
     def test_defaults_match_the_documented_values(self) -> None:
         options = ConnectionOptions()
 
         assert options.mode == "streaming"
-        assert options.polling_interval == 60.0
+        assert options.polling_interval is None
         assert options.timeout == 3.0
         assert options.url is None
 

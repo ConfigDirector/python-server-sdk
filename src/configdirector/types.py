@@ -162,7 +162,8 @@ class ConnectionOptions:
             With ``"polling"``, config state is retrieved once during initialization and then
             re-fetched every ``polling_interval``.
         polling_interval: The polling interval **in seconds**, used only when ``mode`` is
-            ``"polling"``. Defaults to 60 seconds.
+            ``"polling"``. Must be at least 60 seconds. Defaults to 5 minutes (300 seconds)
+            when omitted.
         timeout: The timeout **in seconds** applied to initialization. When streaming is
             enabled, initialization may still succeed after the timeout elapses as long as no
             unrecoverable error (such as an invalid SDK key) is encountered. When streaming is
@@ -172,7 +173,7 @@ class ConnectionOptions:
     """
 
     mode: ConnectionMode = "streaming"
-    polling_interval: float = 60.0
+    polling_interval: float | None = None
     timeout: float = 3.0
     url: str | None = None
 

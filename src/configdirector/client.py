@@ -21,7 +21,12 @@ from ._telemetry import (
     TelemetryCollectorOptions,
     value_id_for,
 )
-from ._transport import TransportOptions, create_transport
+from ._transport import (
+    DEFAULT_POLLING_INTERVAL,
+    MIN_POLLING_INTERVAL,
+    TransportOptions,
+    create_transport,
+)
 from ._value_parser import parse_config_value
 from ._version import _SDK_NAME, SdkIdentity, __version__
 from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
@@ -88,7 +93,8 @@ class _ConfigDirectorClient(ConfigDirectorClient):
 
     Raises:
         ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
-            ``connection.url`` is not a valid URL, or if a ``telemetry`` setting is out of range.
+            ``connection.url`` is not a valid URL, if ``connection.polling_interval`` is below
+            60 seconds, or if a ``telemetry`` setting is out of range.
     """
 
     def __init__(
@@ -114,6 +120,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         self._sdk_version = __version__
         self._metadata = metadata if metadata is not None else Metadata()
         self._connection = connection if connection is not None else ConnectionOptions()
+        self._polling_interval = _validated_polling_interval(self._connection.polling_interval)
         self._telemetry_options = _validated_telemetry(
             telemetry if telemetry is not None else TelemetryOptions()
         )
@@ -140,7 +147,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
                 logger=self._logger,
                 on_bundle=self._on_bundle,
                 http=self._http,
-                polling_interval=self._connection.polling_interval,
+                polling_interval=self._polling_interval,
             ),
         )
 
@@ -556,7 +563,8 @@ def create_client(
 
     Raises:
         ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
-            ``connection.url`` is not a valid URL, or if a ``telemetry`` setting is out of range.
+            ``connection.url`` is not a valid URL, if ``connection.polling_interval`` is below
+            60 seconds, or if a ``telemetry`` setting is out of range.
     """
     return _ConfigDirectorClient(
         server_sdk_key,
@@ -627,6 +635,17 @@ def _validated_telemetry(options: TelemetryOptions) -> TelemetryOptions:
             f"number of seconds."
         )
     return options
+
+
+def _validated_polling_interval(interval: float | None) -> float:
+    if interval is None:
+        return DEFAULT_POLLING_INTERVAL
+
+    if interval < MIN_POLLING_INTERVAL:
+        raise ConfigDirectorValidationError(
+            f"Invalid polling interval '{interval}'. It must be at least {MIN_POLLING_INTERVAL:g} seconds."
+        )
+    return interval
 
 
 def _validated_url(url: str | None) -> str | None:

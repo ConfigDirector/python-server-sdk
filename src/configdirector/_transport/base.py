@@ -14,6 +14,8 @@ from ..errors import ConfigDirectorConnectionError
 from ..types import ConfigDirectorLogger
 
 __all__ = [
+    "DEFAULT_POLLING_INTERVAL",
+    "MIN_POLLING_INTERVAL",
     "REQUEST_HEADERS",
     "Transport",
     "TransportOptions",
@@ -27,6 +29,9 @@ __all__ = [
 # "Python-urllib/3.x", which bot-protection layers in front of the API reject before the request
 # ever reaches the origin — surfacing as a 403 that looks exactly like a rejected SDK key.
 _USER_AGENT = f"{_SDK_NAME}/{__version__}"
+
+DEFAULT_POLLING_INTERVAL = 300.0
+MIN_POLLING_INTERVAL = 60.0
 
 # A read-only view, because one dict is shared by every request the SDK makes: editing it in
 # place would silently change the headers of the transport and the telemetry reporter alike.
@@ -44,7 +49,7 @@ class TransportOptions:
     on_bundle: Callable[[ConfigBundle], None]
     # Owned by the client, and shared with the telemetry reporter: both talk to the same host.
     http: HttpClient = field(default_factory=HttpClient)
-    polling_interval: float = 60.0
+    polling_interval: float = DEFAULT_POLLING_INTERVAL
 
 
 class Transport(Protocol):
