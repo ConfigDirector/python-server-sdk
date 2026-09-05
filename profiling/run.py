@@ -107,7 +107,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         default="streaming",
-        choices=("streaming", "polling", "one-time"),
+        choices=("streaming", "polling"),
         help="SDK connection mode to profile.",
     )
     parser.add_argument(

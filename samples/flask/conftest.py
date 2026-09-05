@@ -15,5 +15,5 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("CONFIGDIRECTOR_BASE_URL", "http://127.0.0.1:1")
-os.environ.setdefault("CONFIGDIRECTOR_MODE", "one-time")
+os.environ.setdefault("CONFIGDIRECTOR_MODE", "polling")
 os.environ.setdefault("CONFIGDIRECTOR_TIMEOUT", "0.5")

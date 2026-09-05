@@ -723,7 +723,7 @@ class TestClose:
 
 
 class TestConnectionOptions:
-    @pytest.mark.parametrize("mode", ["streaming", "polling", "one-time"])
+    @pytest.mark.parametrize("mode", ["streaming", "polling"])
     def test_supports_every_connection_mode(self, mode: Any, transports: TransportRecorder) -> None:
         client = _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode=mode))
         client.initialize()

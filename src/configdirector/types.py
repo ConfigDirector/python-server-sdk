@@ -51,7 +51,7 @@ ConfigValue = str | int | float | bool | dict[str, Any] | list[Any]
 
 ConfigValueT = TypeVar("ConfigValueT", bound=ConfigValue)
 
-ConnectionMode = Literal["streaming", "polling", "one-time"]
+ConnectionMode = Literal["streaming", "polling"]
 """How the SDK retrieves config state from ConfigDirector."""
 
 EvaluationReason = Literal[
@@ -154,17 +154,13 @@ class ConnectionOptions:
     """Options controlling how the client connects to ConfigDirector.
 
     Attributes:
-        mode: The connection mode, one of ``"streaming"`` (default), ``"polling"``, or
-            ``"one-time"``.
+        mode: The connection mode, one of ``"streaming"`` (default) or ``"polling"``.
 
             With ``"streaming"``, the connection stays open and receives updates whenever
             config state changes in the ConfigDirector dashboard.
 
             With ``"polling"``, config state is retrieved once during initialization and then
             re-fetched every ``polling_interval``.
-
-            With ``"one-time"``, config state is only retrieved during initialization and is
-            never refreshed.
         polling_interval: The polling interval **in seconds**, used only when ``mode`` is
             ``"polling"``. Defaults to 60 seconds.
         timeout: The timeout **in seconds** applied to initialization. When streaming is

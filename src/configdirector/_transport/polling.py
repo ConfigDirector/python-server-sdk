@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 import uuid
-from dataclasses import replace
 from typing import NoReturn
 
 from .._bundle import parse_bundle
@@ -17,7 +16,7 @@ from .base import (
     resolve,
 )
 
-__all__ = ["OneTimeTransport", "PollingTransport"]
+__all__ = ["PollingTransport"]
 
 _PATH = "server/polling/v1"
 
@@ -159,8 +158,3 @@ class PollingTransport:
         # Deliberately outside the lock: close() takes it too, and this Lock is not reentrant.
         self.close()
         raise error
-
-
-class OneTimeTransport(PollingTransport):
-    def __init__(self, options: TransportOptions) -> None:
-        super().__init__(replace(options, polling_interval=0.0))

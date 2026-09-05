@@ -41,7 +41,7 @@ the same as a real shutdown — and the report is written.
 | `--rps` | 25 | Requests per second. Anything from 1 to ~100 is comfortable on a laptop. |
 | `--duration` | 60 | Seconds to hold that rate. |
 | `--distinct-users` | 500 | How many distinct user ids the traffic cycles through. Raise it to grow the SDK's per-context telemetry; drop it to 1 to take context cardinality out of the picture. |
-| `--mode` | `streaming` | SDK connection mode: `streaming`, `polling`, or `one-time`. |
+| `--mode` | `streaming` | SDK connection mode: `streaming` or `polling`. |
 | `--offline` | off | Point the SDK at an address nothing answers on. Every config resolves to its default, so this profiles the fallback path — and gives a network-free comparison run. |
 | `--sample-interval` | 0.25 | Seconds between CPU/memory samples. |
 | `--max-in-flight` | `max(50, 4×rps)` | Concurrency cap. Requests over the cap are recorded as skipped rather than queued. |
@@ -121,6 +121,6 @@ memory from outside the app process, [`load.py`](load.py) generates traffic,
   telemetry.
 * **A long run with a long `--cooldown`.** Telemetry flushes every 30s by default; a 5-minute run
   with a 60s cooldown shows several flushes and whether anything accumulates between them.
-* **`--mode one-time` against `--mode streaming`.** Separates the streaming connection's standing
+* **`--mode polling` against `--mode streaming`.** Separates the streaming connection's standing
   cost from the evaluation path.
 * **`--cpu-profile` once you have a suspect**, to find which functions the time is actually in.

@@ -11,7 +11,6 @@ import pytest
 
 from configdirector._bundle import ConfigBundle
 from configdirector._transport import (
-    OneTimeTransport,
     PollingTransport,
     StreamingTransport,
     TransportOptions,
@@ -339,23 +338,6 @@ class TestPollingTransport:
         assert server.paths == ["/proxy/server/polling/v1"]
 
 
-class TestOneTimeTransport:
-    def test_fetches_once_and_never_polls(
-        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
-    ) -> None:
-        server = serve(lambda request: respond(request, 200, bundle_json("greeting")))
-        transport = OneTimeTransport(options(server.url, sink, logger, polling_interval=0.02))
-
-        try:
-            transport.connect(5.0)
-            assert wait_for(lambda: len(server.requests) > 1, timeout=0.2) is False
-        finally:
-            transport.close()
-
-        assert sink.keys == [["greeting"]]
-        assert transport.is_connected is False
-
-
 # What the server promises: axum's KeepAlive::default() sends a comment every 15 seconds, so a
 # stream silent for meaningfully longer than that is not idle, it is broken.
 _SERVER_KEEPALIVE = 15.0
@@ -590,7 +572,11 @@ class TestUserAgent:
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
     ) -> None:
         server = serve(lambda request: respond(request, 200, bundle_json("a")))
-        OneTimeTransport(options(server.url, sink, logger)).connect(5.0)
+        transport = PollingTransport(options(server.url, sink, logger))
+        try:
+            transport.connect(5.0)
+        finally:
+            transport.close()
 
         user_agent = server.headers[0].get("User-Agent", "")
         assert "python-server-sdk" in user_agent
