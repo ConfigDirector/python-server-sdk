@@ -76,8 +76,9 @@ def json_body(payload: Mapping[str, Any]) -> bytes:
 
 def is_fatal_status(status: int | None) -> bool:
     # A 4xx means the request itself is wrong — a revoked SDK key, a bad URL — and repeating it
-    # unchanged will only fail the same way.
-    return status is not None and 400 <= status < 500
+    # unchanged will only fail the same way. A 429 is the exception: the request is fine, there
+    # were just too many of them, so retrying later is expected to succeed.
+    return status is not None and 400 <= status < 500 and status != 429
 
 
 def fatal_status_error(status: int | None, detail: str | None = None) -> ConfigDirectorConnectionError:

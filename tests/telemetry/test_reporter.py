@@ -245,7 +245,7 @@ class TestFailures:
 
         assert reporter.report(report(event())) == reporter_module.ReporterResponse(success=True)
 
-    @pytest.mark.parametrize("status", [400, 401, 403, 404, 429])
+    @pytest.mark.parametrize("status", [400, 401, 403, 404])
     def test_a_client_error_is_fatal(
         self, reporter: HttpEventReporter, http: StubHttp, status: int, logger: RecordingLogger
     ) -> None:
@@ -256,6 +256,14 @@ class TestFailures:
         assert response.success is False
         assert response.fatal is True
         assert any(str(status) in message for message in logger.messages("warning"))
+
+    def test_a_rate_limit_is_worth_retrying(self, reporter: HttpEventReporter, http: StubHttp) -> None:
+        http.status = 429
+
+        response = reporter.report(report(event()))
+
+        assert response.success is False
+        assert response.fatal is False
 
     @pytest.mark.parametrize("status", [500, 502, 503])
     def test_a_server_error_is_worth_retrying(

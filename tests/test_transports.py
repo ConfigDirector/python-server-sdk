@@ -286,6 +286,23 @@ class TestPollingTransport:
         assert transport.is_connected is False
         assert len(server.requests) == 1
 
+    def test_a_rate_limit_is_raised_but_leaves_polling_running(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        server = serve(lambda request: respond(request, 429, "Too Many Requests"))
+        transport = PollingTransport(options(server.url, sink, logger, polling_interval=0.02))
+
+        try:
+            with pytest.raises(ConfigDirectorConnectionError, match="status: 429") as raised:
+                transport.connect(5.0)
+
+            assert wait_for(lambda: len(server.requests) >= 2)
+            assert transport.is_connected is True
+        finally:
+            transport.close()
+
+        assert "unrecoverable" not in str(raised.value)
+
     def test_a_malformed_response_body_is_reported(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
     ) -> None:
@@ -501,6 +518,28 @@ class TestStreamingTransport:
 
         try:
             # The first attempt fails; the backoff schedules the retry that succeeds.
+            transport.connect(0.1)
+            assert wait_for(lambda: len(sink.bundles) == 1, timeout=10)
+        finally:
+            transport.close()
+
+        assert sink.keys == [["greeting"]]
+
+    def test_a_rate_limit_status_is_retried(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            if len(server.requests) == 1:
+                respond(request, 429, "Too Many Requests")
+                return
+            sse_headers(request)
+            request.wfile.write(f"data: {bundle_json('greeting')}\n\n".encode())
+            request.wfile.flush()
+
+        server = serve(handle)
+        transport = StreamingTransport(options(server.url, sink, logger))
+
+        try:
             transport.connect(0.1)
             assert wait_for(lambda: len(sink.bundles) == 1, timeout=10)
         finally:
