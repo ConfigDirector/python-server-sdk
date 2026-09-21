@@ -1,6 +1,6 @@
 # Profiling
 
-Exploratory load profiling for the SDK: drive the [Flask sample](../samples/flask) at a chosen
+Exploratory load profiling for the SDK: drive the [Flask sample](../samples/configdirector-server-sdk/flask) at a chosen
 request rate for a chosen length of time, record the app process's CPU and memory the whole way
 through, and write the result out in a form you can graph and compare.
 
@@ -76,7 +76,7 @@ The two numbers worth watching:
 ## Reading the results honestly
 
 **Check `client_ready` first.** `summary.md` says whether the SDK client ever became ready.
-Without a working key in `samples/flask/.env` it never does, every config resolves to its default,
+Without a working key in `samples/configdirector-server-sdk/flask/.env` it never does, every config resolves to its default,
 and the run measures the fallback path rather than real evaluation. The report says so in its
 warnings; it does not stop you, because that path is worth profiling too.
 
@@ -87,7 +87,7 @@ every respect except the per-request SDK work.
 
 **The harness changes two things about the sample**, both to keep the measurement honest, and both
 in [`server.py`](server.py): Werkzeug's per-request log line is silenced, and the SDK's logger is
-forced to WARNING. `samples/flask/.env` may ask for DEBUG, which logs every single evaluation and
+forced to WARNING. `samples/configdirector-server-sdk/flask/.env` may ask for DEBUG, which logs every single evaluation and
 would cost more than the evaluation being measured.
 
 **Load is generated in a separate process** from the app, so the generator's own CPU and memory

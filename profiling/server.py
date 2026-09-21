@@ -6,14 +6,15 @@ hand::
 
     uv run python server.py --port 3600
 
-The app itself is imported unmodified from ``samples/flask`` — importing ``app`` is what creates
-and initializes the singleton client, exactly as it would under a real WSGI server. Only three
-things differ from ``flask run``, and each one exists to keep the measurement honest:
+The app itself is imported unmodified from ``samples/configdirector-server-sdk/flask`` —
+importing ``app`` is what creates and initializes the singleton client, exactly as it would
+under a real WSGI server. Only three things differ from ``flask run``, and each one exists to
+keep the measurement honest:
 
 * **Werkzeug's request log is silenced.** One log line per request costs more than the config
   evaluation being measured, and at 100 requests per second it dominates the profile.
-* **The SDK's own logger defaults to WARNING.** ``samples/flask/.env`` may set ``DEBUG``, which
-  logs every evaluation — useful when learning the SDK, ruinous when timing it.
+* **The SDK's own logger defaults to WARNING.** ``samples/configdirector-server-sdk/flask/.env``
+  may set ``DEBUG``, which logs every evaluation — useful when learning the SDK, ruinous when timing it.
 * **Optional instrumentation.** ``--cpu-profile`` (cProfile) and ``--tracemalloc`` attribute time
   and allocations to functions. Both distort the totals, so they are off by default and belong
   in a separate run from the one that produces the time series.
@@ -41,7 +42,7 @@ from dotenv import load_dotenv
 from werkzeug.serving import make_server
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SAMPLE_DIR = REPO_ROOT / "samples" / "flask"
+SAMPLE_DIR = REPO_ROOT / "samples" / "configdirector-server-sdk" / "flask"
 
 # How many allocation sites to keep in the tracemalloc report.
 TRACEMALLOC_TOP = 25
@@ -85,7 +86,7 @@ def load_sample_app(log_level: str) -> tuple[Any, Any]:
     The sample resolves its configuration from the environment, so everything the harness wants
     to control has to be set before this import runs — which is why the import is down here and
     not at the top of the module. Environment variables already set by the caller win over
-    ``samples/flask/.env``, because ``load_dotenv`` does not override.
+    ``samples/configdirector-server-sdk/flask/.env``, because ``load_dotenv`` does not override.
     """
     os.environ.setdefault("CONFIGDIRECTOR_LOG_LEVEL", log_level)
     load_dotenv(SAMPLE_DIR / ".env")

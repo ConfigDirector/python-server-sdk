@@ -31,6 +31,20 @@ jobs:
       - run: make lint
       - run: make typecheck
 
+  lowest:
+    name: Test (lowest supported dependencies)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: make test-lowest
+
   test:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -60,7 +74,7 @@ jobs:
       - run: make coverage
 
   build:
-    name: Build distribution
+    name: Build distributions
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -71,7 +85,8 @@ jobs:
         with:
           enable-cache: true
 
-      # Builds into dist/, checks the metadata, and imports the wheel in a clean environment.
+      # Builds every package into dist/<package>/, checks the metadata, and imports each wheel in
+      # a clean environment.
       - run: make dist-check
 
       - uses: actions/upload-artifact@v4
@@ -91,7 +106,7 @@ jobs:
         with:
           enable-cache: true
 
-      # Each sample pins a released SDK from PyPI, so this checks the published wheel.
+      # Each sample pins a released package from PyPI, so this checks the published wheels.
       - run: make samples
 
       # And again against this working tree, which is what catches a breaking API change before

@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Load-profiling harness for the ConfigDirector Python server SDK"
 requires-python = ">=3.10"
 dependencies = [
-  # The app under test is samples/flask, imported in-process by server.py, so its runtime
+  # The app under test is samples/configdirector-server-sdk/flask, imported in-process by server.py, so its runtime
   # dependencies have to be installed here too.
   "configdirector-server-sdk",
   "flask>=3.1",
@@ -23,7 +23,7 @@ package = false
 
 [tool.uv.sources]
 # Always profile the SDK in this repository rather than a published release.
-configdirector-server-sdk = { path = "..", editable = true }
+configdirector-server-sdk = { path = "../configdirector-server-sdk", editable = true }
 
 [tool.ruff]
 # Inherit the SDK's style, but resolve first-party imports against this directory so that
@@ -35,6 +35,6 @@ src = ["."]
 python_version = "3.10"
 files = ["."]
 strict = true
-# The app under test is imported from samples/flask, which is not on mypy's path here. That
+# The app under test is imported from samples/configdirector-server-sdk/flask, which is not on mypy's path here. That
 # sample is typechecked by `make samples`; this harness only needs its own code to be clean.
 ignore_missing_imports = true

@@ -1,45 +1,8 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[project]
-name = "configdirector-server-sdk"
-dynamic = ["version"]
-description = "Python server SDK for ConfigDirector. ConfigDirector is a remote configuration and feature flag service."
-readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
-requires-python = ">=3.10"
-authors = [{ name = "ConfigDirector" }]
-keywords = [
-  "configdirector",
-  "config",
-  "configuration",
-  "remote config",
-  "remote configuration",
-  "feature flag",
-  "feature toggle",
-  "feature switch",
-]
-classifiers = [
-  "Intended Audience :: Developers",
-  "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
-  "Typing :: Typed",
-]
-
-dependencies = ["urllib3>=2.7,<3"]
-
-[project.urls]
-Homepage = "https://www.configdirector.com"
-Documentation = "https://docs.configdirector.com/sdks/server/python"
-Repository = "https://github.com/ConfigDirector/python-server-sdk"
-Support = "https://www.configdirector.com/support"
+[tool.uv.workspace]
+members = ["configdirector-server-sdk", "configdirector-openfeature-server-provider"]
+# Samples and the profiling harness are independent projects: they install the packages the way
+# an application does, and must not resolve against this workspace just because they sit inside it.
+exclude = ["samples/*/*", "profiling"]
 
 [dependency-groups]
 dev = [
@@ -50,19 +13,10 @@ dev = [
   "ruff>=0.9",
 ]
 
-[tool.hatch.version]
-path = "src/configdirector/_version.py"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/configdirector"]
-
-[tool.hatch.build.targets.sdist]
-include = ["src/configdirector", "README.md", "LICENSE"]
-
 [tool.ruff]
 line-length = 110
 target-version = "py310"
-src = ["src", "."]
+src = ["configdirector-server-sdk/src", "configdirector-server-sdk"]
 
 [tool.ruff.lint]
 select = [
@@ -82,36 +36,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 # Test builders mirror the dataclass fields they construct, including `id` and `type`.
-"tests/*" = ["S101", "A002"]
+"*/tests/*" = ["S101", "A002"]
 
 [tool.ruff.format]
 quote-style = "double"
-
-[tool.mypy]
-python_version = "3.10"
-files = ["src", "tests"]
-strict = true
-warn_unreachable = true
-enable_error_code = ["redundant-expr", "possibly-undefined", "truthy-bool"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-# The timeout covers setup, call and teardown, and is generous next to the longest deliberate
-# wait in the suite (~10s). Several tests park a reader on a real socket, so a threading bug
-# surfaces as a suite that never finishes rather than as a failure; this turns that back into a
-# failure. The thread method is the one that works here: it dumps every thread's stack, and it
-# can end a run that is wedged on a lock held across a blocking read, which SIGALRM cannot.
-addopts = "-ra --strict-markers --strict-config --timeout=60 --timeout-method=thread"
-xfail_strict = true
-
-[tool.coverage.run]
-source = ["src/configdirector"]
-branch = true
-
-[tool.coverage.report]
-exclude_lines = [
-  "pragma: no cover",
-  "raise NotImplementedError",
-  "if TYPE_CHECKING:",
-  "\\.\\.\\.",
-]

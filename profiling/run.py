@@ -4,7 +4,7 @@
 
 Everything happens in one command:
 
-1. Start ``samples/flask`` in its own process (:mod:`server`).
+1. Start ``samples/configdirector-server-sdk/flask`` in its own process (:mod:`server`).
 2. Wait for it to answer, then sit idle for a few seconds — that idle stretch is the resting
    memory and CPU baseline every later number is read against.
 3. Send warm-up requests whose cost belongs to nobody: imports, connection setup, and the SDK's
@@ -152,7 +152,8 @@ def make_run_dir(results_dir: Path, label: str) -> Path:
 def server_environment(args: argparse.Namespace) -> dict[str, str]:
     """The environment the app under test sees.
 
-    These win over ``samples/flask/.env``: ``load_dotenv`` does not override what is already set.
+    These win over ``samples/configdirector-server-sdk/flask/.env``: ``load_dotenv`` does not
+    override what is already set.
     Forcing the log level matters most — the sample's ``.env`` may ask for DEBUG, which logs every
     single evaluation and would cost more than the evaluation itself.
     """

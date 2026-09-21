@@ -19,7 +19,7 @@ htmlcov/
 
 # Sample apps and the profiling harness resolve the SDK from a local path, so their locks are
 # not portable.
-samples/*/uv.lock
+samples/*/*/uv.lock
 profiling/uv.lock
 .env
 
