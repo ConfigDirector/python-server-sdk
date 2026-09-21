@@ -55,13 +55,14 @@ exactly one place per package, which Hatch reads the package version from:
    fresh, empty `## [Unreleased]` above it.
 2. Bump `__version__` to match and merge both to `main`.
 3. Run the package's release workflow against `main`. It is manual (`workflow_dispatch`) by
-   design. It builds the distributions with `make release-check`, publishes this package's to
-   TestPyPI, and then to PyPI, using trusted publishing rather than stored tokens.
-4. Tag the released commit `<package>-vX.Y.Z` by hand, for example
-   `configdirector-server-sdk-v1.2.0`. The workflow does not tag.
+   design, and releases whatever version `main` currently declares. It builds the distributions
+   with `make release-check`, publishes this package's to TestPyPI, and then to PyPI, using
+   trusted publishing rather than stored tokens.
 
-PyPI never accepts the same version twice, so a rerun after a successful publish fails. Bump the
-version and go again instead.
+The workflow tags the released commit `<package>-vX.Y.Z`, for example
+`configdirector-server-sdk-v1.2.0`, only after the upload to PyPI succeeds, and refuses to run
+when that tag already exists. PyPI never accepts the same version twice, so bump the version and
+go again instead. SDK releases up to 1.1.0 predate this and are tagged `vX.Y.Z`.
 
 Trusted publishing is configured per package and per workflow file name, on both PyPI and
 TestPyPI. Renaming a release workflow means updating the publisher there first.

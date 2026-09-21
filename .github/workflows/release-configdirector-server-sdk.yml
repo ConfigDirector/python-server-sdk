@@ -10,11 +10,17 @@ defaults:
   run:
     shell: bash
 
+env:
+  PACKAGE: configdirector-server-sdk
+
 jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
 
@@ -23,14 +29,38 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Resolve the version
+        id: version
+        run: |
+          version=$(make --no-print-directory version PACKAGE="$PACKAGE")
+          if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::could not read the version of $PACKAGE, got '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$PACKAGE-v$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $PACKAGE $version"
+
+      - name: Refuse to re-release an existing version
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ -n $(git ls-remote --tags origin "refs/tags/$TAG") ]]; then
+            echo "::error::$TAG already exists, so $VERSION has been released from this workflow" \
+                 "before. PyPI never accepts the same version twice: bump __version__ for" \
+                 "$PACKAGE and run this again."
+            exit 1
+          fi
+
       # Builds and checks the distributions, then installs this package's wheel from PyPI alone,
       # which fails if it depends on a sibling package version that is not published yet.
-      - run: make release-check PACKAGE=configdirector-server-sdk
+      - run: make release-check PACKAGE="$PACKAGE"
 
       - uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist/configdirector-server-sdk/
+          path: dist/${{ env.PACKAGE }}/
 
   testpypi:
     name: Publish to TestPyPI
@@ -67,3 +97,23 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  tag:
+    name: Tag the released commit
+    needs: [build, pypi]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Tag the released commit
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$TAG" -m "$PACKAGE $VERSION"
+          git push origin "$TAG"

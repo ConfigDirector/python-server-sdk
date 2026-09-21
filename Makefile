@@ -1,4 +1,4 @@
-.PHONY: install hooks lint format typecheck test test-lowest coverage build verify-lock dist-check release-check samples samples-local profile check check-all clean
+.PHONY: install hooks lint format typecheck test test-lowest coverage build verify-lock dist-check release-check version samples samples-local profile check check-all clean
 
 # Every package this repository publishes, each in a directory named after its distribution.
 # Narrow a target to one of them with, for example, `make test PACKAGES=configdirector-server-sdk`.
@@ -90,6 +90,12 @@ release-check: dist-check
 	@test -n "$(PACKAGE)" || { echo "usage: make release-check PACKAGE=<package>"; exit 1; }
 	@printf '\n\033[1m==> release-check %s\033[0m\n' "$(PACKAGE)"
 	@$(MAKE) --no-print-directory _import-check PACKAGE="$(PACKAGE)" FIND_LINKS=
+
+# Prints the version a package declares, and nothing else, so a release workflow can name its tag.
+version:
+	@test -n "$(PACKAGE)" || { echo "usage: make version PACKAGE=<package>" >&2; exit 1; }
+	@uv run --quiet --package "$(PACKAGE)" python -c \
+		"import $(IMPORT_$(PACKAGE)) as package; print(package.__version__)"
 
 _import-check:
 	@tmp=$$(mktemp -d); \
