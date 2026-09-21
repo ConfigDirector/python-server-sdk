@@ -42,6 +42,14 @@ Repository = "https://github.com/ConfigDirector/python-server-sdk"
 Changelog = "https://github.com/ConfigDirector/python-server-sdk/blob/main/configdirector-server-sdk/CHANGELOG.md"
 Support = "https://www.configdirector.com/support"
 
+[dependency-groups]
+dev = [
+  "mypy>=1.14",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "pytest-timeout>=2.3",
+]
+
 [tool.hatch.version]
 path = "src/configdirector/_version.py"
 

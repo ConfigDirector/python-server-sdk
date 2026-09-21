@@ -4,14 +4,10 @@ members = ["configdirector-server-sdk", "configdirector-openfeature-server-provi
 # an application does, and must not resolve against this workspace just because they sit inside it.
 exclude = ["samples/*/*", "profiling"]
 
+# Only what runs from this directory. Each package declares the tools its own checks need, because
+# `uv run` inside a package installs that package's groups and is not guaranteed to add these.
 [dependency-groups]
-dev = [
-  "mypy>=1.14",
-  "pytest>=8.3",
-  "pytest-cov>=6.0",
-  "pytest-timeout>=2.3",
-  "ruff>=0.9",
-]
+dev = ["ruff>=0.9"]
 
 [tool.ruff]
 line-length = 110

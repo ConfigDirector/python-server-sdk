@@ -13,13 +13,7 @@ members = [
 ]
 
 [manifest.dependency-groups]
-dev = [
-    { name = "mypy", specifier = ">=1.14" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "pytest-cov", specifier = ">=6.0" },
-    { name = "pytest-timeout", specifier = ">=2.3" },
-    { name = "ruff", specifier = ">=0.9" },
-]
+dev = [{ name = "ruff", specifier = ">=0.9" }]
 
 [[package]]
 name = "ast-serialize"
@@ -79,10 +73,26 @@ dependencies = [
     { name = "openfeature-sdk" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-timeout" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "configdirector-server-sdk", editable = "configdirector-server-sdk" },
     { name = "openfeature-sdk", specifier = ">=0.8.2,<1" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.14" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "pytest-timeout", specifier = ">=2.3" },
 ]
 
 [[package]]
@@ -92,8 +102,24 @@ dependencies = [
     { name = "urllib3" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-timeout" },
+]
+
 [package.metadata]
 requires-dist = [{ name = "urllib3", specifier = ">=2.7,<3" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.14" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "pytest-timeout", specifier = ">=2.3" },
+]
 
 [[package]]
 name = "coverage"
