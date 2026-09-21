@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-21
+
 ### Added
 
 - `ConfigDirectorProvider`, an OpenFeature server provider backed by the ConfigDirector Python server SDK. It resolves boolean, string, integer, float, and object flags, maps the OpenFeature evaluation context onto the ConfigDirector context, reports evaluation reasons, variants, and error codes, and emits `PROVIDER_READY` and `PROVIDER_CONFIGURATION_CHANGED` events.
