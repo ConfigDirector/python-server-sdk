@@ -117,7 +117,7 @@ class ConfigEvaluator:
         config: Config,
         context: EvaluationContext | None,
     ) -> _RuleResult:
-        if not any(evaluate_condition(condition, context) for condition in rule.conditions or []):
+        if not all(evaluate_condition(condition, context) for condition in rule.conditions or []):
             return _NO_MATCH
         if rule.target == "value" and rule.value is not None:
             return _RuleResult(matched=True, value=to_json_string(rule.value), value_id=rule.value_id)

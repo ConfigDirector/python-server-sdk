@@ -42,6 +42,39 @@ def identifier_is(value: str) -> Condition:
     )
 
 
+def plan_is(value: str) -> Condition:
+    return Condition(
+        id=uid(),
+        attribute="traits",
+        operator="=",
+        trait="/plan",
+        target_type="text",
+        target_values=[value],
+    )
+
+
+def config_requiring(*conditions: Condition) -> Config:
+    return Config(
+        id=CONFIG_ID,
+        key="config-with-a-two-condition-rule",
+        type="string",
+        variations=[],
+        target=TargetingRules(
+            default_value="this-is-the-default",
+            rules=[
+                ConditionalRule(
+                    id=uid(),
+                    order=0,
+                    target="value",
+                    value="Rule A Value",
+                    percentages=[],
+                    conditions=list(conditions),
+                )
+            ],
+        ),
+    )
+
+
 def test_evaluates_to_the_default_value_when_there_are_no_targeting_rules() -> None:
     config = Config(
         id=CONFIG_ID,
@@ -251,7 +284,7 @@ class TestConditionalRules:
         assert evaluator.evaluate(config, ctx(id="15")).value == "Rule B Value"
         assert evaluator.evaluate(config, ctx(id="20")).value == "this-is-the-default"
 
-    def test_falls_back_to_the_default_when_conditions_array_is_empty(self) -> None:
+    def test_a_rule_with_no_conditions_applies_to_every_context(self) -> None:
         config = Config(
             id=CONFIG_ID,
             key="config-without-rules",
@@ -272,32 +305,38 @@ class TestConditionalRules:
             ),
         )
 
-        assert evaluator.evaluate(config, ctx(id="10")).value == "this-is-the-default"
+        assert evaluator.evaluate(config, ctx(id="10")).value == "Rule A Value"
+        assert evaluator.evaluate(config).value == "Rule A Value"
 
-    def test_matches_on_the_first_true_condition(self) -> None:
-        config = Config(
-            id=CONFIG_ID,
-            key="config-without-rules",
-            type="string",
-            variations=[],
-            target=TargetingRules(
-                default_value="this-is-the-default",
-                rules=[
-                    ConditionalRule(
-                        id=uid(),
-                        order=0,
-                        target="value",
-                        value="Rule A Value",
-                        percentages=[],
-                        conditions=[identifier_is("10"), identifier_is("20")],
-                    )
-                ],
-            ),
+    def test_a_rule_with_several_conditions_matches_when_every_condition_matches(self) -> None:
+        config = config_requiring(identifier_is("10"), plan_is("pro"))
+
+        assert evaluator.evaluate(config, ctx(id="10", traits={"plan": "pro"})).value == "Rule A Value"
+
+    def test_a_rule_with_several_conditions_does_not_match_when_only_the_first_matches(self) -> None:
+        config = config_requiring(identifier_is("10"), plan_is("pro"))
+
+        assert (
+            evaluator.evaluate(config, ctx(id="10", traits={"plan": "free"})).value == "this-is-the-default"
         )
 
-        assert evaluator.evaluate(config, ctx(id="10")).value == "Rule A Value"
-        assert evaluator.evaluate(config, ctx(id="20")).value == "Rule A Value"
-        assert evaluator.evaluate(config, ctx(id="30")).value == "this-is-the-default"
+    def test_a_rule_with_several_conditions_does_not_match_when_only_the_second_matches(self) -> None:
+        config = config_requiring(identifier_is("10"), plan_is("pro"))
+
+        assert evaluator.evaluate(config, ctx(id="20", traits={"plan": "pro"})).value == "this-is-the-default"
+
+    def test_a_rule_with_several_conditions_does_not_match_when_no_condition_matches(self) -> None:
+        config = config_requiring(identifier_is("10"), plan_is("pro"))
+
+        assert (
+            evaluator.evaluate(config, ctx(id="20", traits={"plan": "free"})).value == "this-is-the-default"
+        )
+
+    def test_a_rule_whose_conditions_cannot_all_hold_never_matches(self) -> None:
+        config = config_requiring(identifier_is("10"), identifier_is("20"))
+
+        assert evaluator.evaluate(config, ctx(id="10")).value == "this-is-the-default"
+        assert evaluator.evaluate(config, ctx(id="20")).value == "this-is-the-default"
 
     def test_falls_back_to_the_default_when_the_condition_matches_but_the_value_is_none(
         self,

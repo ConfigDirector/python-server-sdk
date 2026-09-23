@@ -8,6 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-23
+
+### Fixed
+
+- The rules evaluator now ANDs multiple conditions in a conditional rule, rather than evaluating them as an OR.
+
 ## [1.2.0] - 2026-09-21
 
 ### Added

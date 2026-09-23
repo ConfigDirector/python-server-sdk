@@ -6,7 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-## [1.2.0] - 2026-09-21
+## [1.1.0] - 2026-09-23
+
+### Fixed
+
+- Bump the dependency on the server SDK to 1.3.0 in order to pick up the conditional evaluation fix.
+
+## [1.0.0] - 2026-09-21
 
 ### Added
 
