@@ -35,6 +35,25 @@ class TestStrings:
     def test_a_string_default_takes_json_as_raw_text(self) -> None:
         assert parse_config_value(state('{"a":1}', type="json"), "fallback").value == '{"a":1}'
 
+    @pytest.mark.parametrize("type", ["string", "enum", "url", "custom"])
+    def test_returns_the_stored_value_of_every_text_config(self, type: ConfigType) -> None:
+        result = parse_config_value(state("true", type=type), "fallback")
+
+        assert result.value == "true"
+        assert result.used_default is False
+        assert result.reason == "found-match"
+
+    @pytest.mark.parametrize(("type", "stored"), [("boolean", "true"), ("integer", "26"), ("float", "3.5")])
+    def test_falls_back_when_a_boolean_or_numeric_config_is_asked_for_as_text(
+        self, type: ConfigType, stored: str
+    ) -> None:
+        result = parse_config_value(state(stored, type=type), "fallback")
+
+        assert result.value == "fallback"
+        assert result.used_default is True
+        assert result.reason == "type-mismatch"
+        assert result.value_id is None
+
 
 class TestBooleans:
     @pytest.mark.parametrize(("stored", "expected"), [("true", True), ("false", False), ("TRUE", True)])

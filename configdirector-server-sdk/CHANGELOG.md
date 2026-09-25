@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-25
+
+### Changed
+
+- A boolean, integer, or float config requested as a string now evaluates to the default value
+  with the `type-mismatch` reason, instead of the value's text with `found-match`. Reading a JSON
+  config as a string still returns its raw document.
+
 ## [1.3.0] - 2026-09-23
 
 ### Fixed

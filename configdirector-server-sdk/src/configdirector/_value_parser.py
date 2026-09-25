@@ -4,9 +4,11 @@ import json
 import math
 from dataclasses import dataclass
 
-from .types import ConfigState, ConfigValue, EvaluationReason
+from .types import ConfigState, ConfigType, ConfigValue, EvaluationReason
 
 __all__ = ["ParseResult", "parse_config_value"]
+
+_CONFIG_TYPES_NOT_READABLE_AS_STRING: frozenset[ConfigType] = frozenset({"boolean", "integer", "float"})
 
 # The only characters a decimal literal may contain. Checking membership up front rules out
 # what int() and float() would otherwise accept: surrounding whitespace, digit separators such
@@ -38,6 +40,8 @@ def parse_config_value(state: ConfigState, default: ConfigValue) -> ParseResult:
         return _matched(parsed_bool, state)
 
     if isinstance(default, str):
+        if state.type in _CONFIG_TYPES_NOT_READABLE_AS_STRING:
+            return ParseResult(value=default, reason="type-mismatch", used_default=True)
         return _matched(raw, state)
 
     if isinstance(default, int):
