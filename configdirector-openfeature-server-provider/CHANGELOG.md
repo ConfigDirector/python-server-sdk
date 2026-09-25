@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-25
+
+### Changed
+
+- Bump the dependency on the server SDK to 1.4.0 in order to pick up the type mismatch update.
+
 ## [1.1.0] - 2026-09-23
 
 ### Fixed
