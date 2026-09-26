@@ -21,6 +21,8 @@ from configdirector.types import Context
 from tests.helpers import RecordingLogger
 
 BASE_URL = "https://server-sdk-api.configdirector.com"
+SDK_IDENTITY = SdkIdentity(sdk_name="telemetry-tests", sdk_version="1.2.3")
+META_CONTEXT = {"sdkName": "telemetry-tests", "sdkVersion": "1.2.3"}
 START = datetime(2026, 1, 1, 0, 0, 0, 500_000, tzinfo=timezone.utc)
 END = datetime(2026, 1, 1, 0, 1, 0, tzinfo=timezone.utc)
 
@@ -72,7 +74,8 @@ def reporter(logger: RecordingLogger, http: StubHttp) -> HttpEventReporter:
     return HttpEventReporter(
         server_sdk_key="sdk-key",
         base_url=BASE_URL,
-        sdk_identity=SdkIdentity(sdk_name="telemetry-tests", sdk_version="1.2.3"),
+        meta_context=META_CONTEXT,
+        sdk_identity=SDK_IDENTITY,
         logger=logger,
         http=cast(HttpClient, http),
     )
@@ -114,7 +117,8 @@ class TestRequest:
         proxied = HttpEventReporter(
             server_sdk_key="sdk-key",
             base_url="https://proxy.example.com/configdirector",
-            sdk_identity=SdkIdentity(sdk_name="tests", sdk_version="1.2.3"),
+            meta_context=META_CONTEXT,
+            sdk_identity=SDK_IDENTITY,
             logger=logger,
             http=cast(HttpClient, http),
         )
@@ -149,6 +153,34 @@ class TestPayload:
 
         assert http.payload["metaContext"]["sdkName"] == "telemetry-tests"
         assert http.payload["metaContext"]["sdkVersion"] == "1.2.3"
+
+    def test_sends_the_app_name_and_version_from_the_meta_context(
+        self, logger: RecordingLogger, http: StubHttp
+    ) -> None:
+        identified = HttpEventReporter(
+            server_sdk_key="sdk-key",
+            base_url=BASE_URL,
+            meta_context={**META_CONTEXT, "appName": "checkout", "appVersion": "2.1.0"},
+            sdk_identity=SDK_IDENTITY,
+            logger=logger,
+            http=cast(HttpClient, http),
+        )
+
+        identified.report(report(event()))
+
+        assert http.payload["metaContext"] == {
+            "sdkName": "telemetry-tests",
+            "sdkVersion": "1.2.3",
+            "appName": "checkout",
+            "appVersion": "2.1.0",
+        }
+
+    def test_omits_the_app_name_and_version_when_the_meta_context_has_none(
+        self, reporter: HttpEventReporter, http: StubHttp
+    ) -> None:
+        reporter.report(report(event()))
+
+        assert http.payload["metaContext"] == {"sdkName": "telemetry-tests", "sdkVersion": "1.2.3"}
 
     def test_sends_each_aggregated_evaluation_with_its_window_and_count(
         self, reporter: HttpEventReporter, http: StubHttp

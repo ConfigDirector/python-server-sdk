@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .._http import HttpClient
@@ -42,6 +43,7 @@ _EVALUATION_SHARE = 7
 class TelemetryCollectorOptions:
     server_sdk_key: str
     base_url: str
+    meta_context: Mapping[str, str]
     sdk_identity: SdkIdentity
     logger: ConfigDirectorLogger
     # Owned by the client and shared with the transport. Unused when `reporter` is supplied.
@@ -61,6 +63,7 @@ class TelemetryCollector:
         self._reporter = options.reporter or HttpEventReporter(
             server_sdk_key=options.server_sdk_key,
             base_url=options.base_url,
+            meta_context=options.meta_context,
             sdk_identity=options.sdk_identity,
             logger=options.logger,
             http=options.http,

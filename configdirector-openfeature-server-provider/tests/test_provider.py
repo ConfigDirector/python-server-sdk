@@ -79,6 +79,20 @@ class TestConstruction:
         assert meta_context["appName"] == "checkout"
         assert meta_context["appVersion"] == "2.1.0"
 
+    def test_reports_telemetry_with_the_app_name_and_version(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve(config("greeting", "string", "hello"))
+        provider = provide(server, metadata=Metadata(app_name="checkout", app_version="2.1.0"))
+        provider.initialize(EvaluationContext())
+        provider.resolve_string_details("greeting", "default")
+
+        provider.shutdown()
+
+        meta_context = server.requests_to(TELEMETRY_PATH)[0].body["metaContext"]
+        assert meta_context["appName"] == "checkout"
+        assert meta_context["appVersion"] == "2.1.0"
+
     def test_rejects_a_blank_sdk_key(self) -> None:
         with pytest.raises(ConfigDirectorValidationError):
             ConfigDirectorProvider(" ")

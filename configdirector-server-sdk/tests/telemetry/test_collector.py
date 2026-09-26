@@ -61,6 +61,7 @@ def make_collector(reporter: FakeReporter, logger: RecordingLogger) -> Iterator[
         options: dict[str, object] = {
             "server_sdk_key": "sdk-key",
             "base_url": "https://server-sdk-api.configdirector.com",
+            "meta_context": {"sdkName": "telemetry-tests", "sdkVersion": "1.2.3"},
             "sdk_identity": SdkIdentity(sdk_name="telemetry-tests", sdk_version="1.2.3"),
             "logger": logger,
             "flush_interval": NEVER,

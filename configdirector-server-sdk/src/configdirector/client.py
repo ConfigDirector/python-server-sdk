@@ -138,12 +138,13 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         self._event_handlers: dict[str, list[Callable[[Any], None]]] = {name: [] for name in _EVENT_NAMES}
         self._ready_event = threading.Event()
         self._evaluator = ConfigEvaluator(self._logger)
+        meta_context = _meta_context(self._metadata, self._sdk_identity)
         self._transport = create_transport(
             self._connection.mode,
             TransportOptions(
                 server_sdk_key=server_sdk_key,
                 base_url=self._base_url,
-                meta_context=_meta_context(self._metadata, self._sdk_identity),
+                meta_context=meta_context,
                 sdk_identity=self._sdk_identity,
                 logger=self._logger,
                 on_bundle=self._on_bundle,
@@ -167,6 +168,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             TelemetryCollectorOptions(
                 server_sdk_key=server_sdk_key,
                 base_url=self._base_url,
+                meta_context=meta_context,
                 sdk_identity=self._sdk_identity,
                 logger=self._logger,
                 http=self._http,

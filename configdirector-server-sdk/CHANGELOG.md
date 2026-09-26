@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-26
+
+### Fixed
+
+- The telemetry report now includes the application name and version supplied in `Metadata`, the
+  same way config requests already did, so evaluations can be shown per app in the dashboard's
+  activity graphs.
+
 ## [1.4.0] - 2026-09-25
 
 ### Changed

@@ -860,6 +860,16 @@ class TestTelemetry:
         assert SERVER_SDK_IDENTITY.sdk_name == "python-server-sdk"
         assert SERVER_SDK_IDENTITY.sdk_version == __version__
 
+    def test_the_collector_reports_the_meta_context_the_transport_sends(
+        self, transports: TransportRecorder, telemetry: TelemetryRecorder
+    ) -> None:
+        _ConfigDirectorClient(SDK_KEY, metadata=Metadata(app_name="app", app_version="1.2.3"))
+
+        meta_context = telemetry.last.options.meta_context
+        assert meta_context["appName"] == "app"
+        assert meta_context["appVersion"] == "1.2.3"
+        assert meta_context is transports.last.options.meta_context
+
     def test_closing_the_client_closes_the_collector(
         self, ready_client: _ConfigDirectorClient, telemetry: TelemetryRecorder
     ) -> None:

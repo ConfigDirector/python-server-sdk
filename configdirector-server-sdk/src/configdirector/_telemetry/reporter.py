@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -61,13 +62,14 @@ class HttpEventReporter:
         *,
         server_sdk_key: str,
         base_url: str,
+        meta_context: Mapping[str, str],
         sdk_identity: SdkIdentity,
         logger: ConfigDirectorLogger,
         http: HttpClient,
         timeout: float = REQUEST_TIMEOUT,
     ) -> None:
         self._server_sdk_key = server_sdk_key
-        self._sdk_identity = sdk_identity
+        self._meta_context = meta_context
         self._headers = request_headers(sdk_identity)
         self._http = http
         self._url = resolve(base_url, _PATH)
@@ -89,10 +91,7 @@ class HttpEventReporter:
     def _payload(self, report: EventReport) -> dict[str, Any]:
         return {
             "serverSdkKey": self._server_sdk_key,
-            "metaContext": {
-                "sdkName": self._sdk_identity.sdk_name,
-                "sdkVersion": self._sdk_identity.sdk_version,
-            },
+            "metaContext": dict(self._meta_context),
             "discreteEvents": {
                 "capturedContexts": [_context_to_wire(context) for context in report.contexts]
             },
