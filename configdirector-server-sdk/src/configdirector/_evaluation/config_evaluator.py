@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 
 from ..types import ConfigDirectorLogger, ConfigState
 from ._json_value import to_json_string
 from .condition_evaluator import evaluate_condition
-from .percent_hashing import assign_percentage
+from .percent_hashing import PERCENTAGE_WITHOUT_IDENTIFIER, assign_percentage
 from .types import (
     ConditionalRule,
     Config,
@@ -90,11 +89,9 @@ class ConfigEvaluator:
         context: EvaluationContext | None,
     ) -> _RuleResult:
         identifier = context.context.id if context is not None and context.context is not None else None
-        if identifier is None:
-            # An anonymous caller still gets a bucket, just not a stable one.
-            identifier = str(uuid.uuid4())
-
-        assigned = assign_percentage(config.id, identifier)
+        assigned = (
+            PERCENTAGE_WITHOUT_IDENTIFIER if identifier is None else assign_percentage(config.id, identifier)
+        )
 
         bucket: Percentage | None = None
         total = 0.0

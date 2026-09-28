@@ -475,8 +475,34 @@ class TestNoContext:
             ),
         )
 
-        # with no context, a random UUID is used — at 100% the bucket always matches
         assert evaluator.evaluate(config).value == "Only Group"
+
+    def test_always_assigns_the_first_non_empty_bucket_without_an_identifier(self) -> None:
+        config = Config(
+            id=CONFIG_ID,
+            key="config-without-rules",
+            type="string",
+            variations=[],
+            target=TargetingRules(
+                default_value="this-is-the-default",
+                rules=[
+                    PercentageRule(
+                        id=uid(),
+                        order=0,
+                        target="percentage",
+                        percentages=[
+                            Percentage(value="never", percentage=0, id=uid()),
+                            Percentage(value="first", percentage=50, id=uid()),
+                            Percentage(value="second", percentage=50, id=uid()),
+                        ],
+                    )
+                ],
+            ),
+        )
+
+        for _ in range(50):
+            assert evaluator.evaluate(config).value == "first"
+            assert evaluator.evaluate(config, ctx()).value == "first"
 
 
 @dataclass(frozen=True, slots=True)

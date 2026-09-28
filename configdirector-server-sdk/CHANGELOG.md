@@ -8,6 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Default a percentage rollout to bucket 0 when there is no context identifier provided, rather than
+  randomly assign on each evaluation.
+
 ## [1.4.1] - 2026-09-26
 
 ### Fixed
