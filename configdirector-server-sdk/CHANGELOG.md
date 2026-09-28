@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- A `polling_interval` below the minimum of 60 seconds (including zero and negative values) is now
+  raised to 60 seconds with a warning logged once at client creation, instead of rejected with a
+  `ConfigDirectorValidationError`. The default remains 300 seconds (5 minutes). In streaming mode
+  the interval is ignored without a warning, and `ConnectionOptions` keeps the configured value.
 - Default a percentage rollout to bucket 0 when there is no context identifier provided, rather than
   randomly assign on each evaluation.
 

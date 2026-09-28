@@ -93,8 +93,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
 
     Raises:
         ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
-            ``connection.url`` is not a valid URL, if ``connection.polling_interval`` is below
-            60 seconds, or if a ``telemetry`` setting is out of range.
+            ``connection.url`` is not a valid URL, or if a ``telemetry`` setting is out of range.
     """
 
     def __init__(
@@ -120,7 +119,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         self._sdk_identity = sdk_identity
         self._metadata = metadata if metadata is not None else Metadata()
         self._connection = connection if connection is not None else ConnectionOptions()
-        self._polling_interval = _validated_polling_interval(self._connection.polling_interval)
+        self._polling_interval = _resolve_polling_interval(self._connection, self._logger)
         self._telemetry_options = _validated_telemetry(
             telemetry if telemetry is not None else TelemetryOptions()
         )
@@ -566,8 +565,7 @@ def create_client(
 
     Raises:
         ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
-            ``connection.url`` is not a valid URL, if ``connection.polling_interval`` is below
-            60 seconds, or if a ``telemetry`` setting is out of range.
+            ``connection.url`` is not a valid URL, or if a ``telemetry`` setting is out of range.
     """
     return _ConfigDirectorClient(
         server_sdk_key,
@@ -640,15 +638,21 @@ def _validated_telemetry(options: TelemetryOptions) -> TelemetryOptions:
     return options
 
 
-def _validated_polling_interval(interval: float | None) -> float:
-    if interval is None:
+def _resolve_polling_interval(connection: ConnectionOptions, logger: ConfigDirectorLogger) -> float:
+    configured_interval = connection.polling_interval
+    if configured_interval is None:
         return DEFAULT_POLLING_INTERVAL
 
-    if interval < MIN_POLLING_INTERVAL:
-        raise ConfigDirectorValidationError(
-            f"Invalid polling interval '{interval}'. It must be at least {MIN_POLLING_INTERVAL:g} seconds."
-        )
-    return interval
+    if connection.mode != "polling" or configured_interval >= MIN_POLLING_INTERVAL:
+        return configured_interval
+
+    logger.warning(
+        "polling_interval of %g seconds is below the minimum of %g seconds. Using %g seconds.",
+        configured_interval,
+        MIN_POLLING_INTERVAL,
+        MIN_POLLING_INTERVAL,
+    )
+    return MIN_POLLING_INTERVAL
 
 
 def _validated_url(url: str | None) -> str | None:

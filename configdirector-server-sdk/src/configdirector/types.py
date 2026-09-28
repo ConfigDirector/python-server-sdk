@@ -162,8 +162,8 @@ class ConnectionOptions:
             With ``"polling"``, config state is retrieved once during initialization and then
             re-fetched every ``polling_interval``.
         polling_interval: The polling interval **in seconds**, used only when ``mode`` is
-            ``"polling"``. Must be at least 60 seconds. Defaults to 5 minutes (300 seconds)
-            when omitted.
+            ``"polling"``. Defaults to 5 minutes (300 seconds) when omitted. The minimum is 60
+            seconds. A value below the minimum is raised to the minimum and a warning is logged.
         timeout: The timeout **in seconds** applied to initialization. When streaming is
             enabled, initialization may still succeed after the timeout elapses as long as no
             unrecoverable error (such as an invalid SDK key) is encountered. When streaming is

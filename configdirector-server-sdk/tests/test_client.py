@@ -741,12 +741,32 @@ class TestConnectionOptions:
 
         assert transports.last.options.polling_interval == 300.0
 
-    @pytest.mark.parametrize("interval", [-1.0, 0, 59.9])
-    def test_rejects_a_polling_interval_below_60_seconds(self, interval: float) -> None:
-        with pytest.raises(ConfigDirectorValidationError, match="polling interval"):
-            _ConfigDirectorClient(
-                SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=interval)
-            )
+    def test_raises_a_polling_interval_below_60_seconds_to_the_minimum_with_one_warning(
+        self, transports: TransportRecorder
+    ) -> None:
+        logger = RecordingLogger()
+
+        _ConfigDirectorClient(
+            SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=10), logger=logger
+        )
+
+        assert transports.last.options.polling_interval == 60.0
+        assert logger.messages("warning") == [
+            "polling_interval of 10 seconds is below the minimum of 60 seconds. Using 60 seconds."
+        ]
+
+    @pytest.mark.parametrize("interval", [0, -1.0, 59.9])
+    def test_raises_a_zero_or_negative_polling_interval_to_the_minimum(
+        self, interval: float, transports: TransportRecorder
+    ) -> None:
+        logger = RecordingLogger()
+
+        _ConfigDirectorClient(
+            SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=interval), logger=logger
+        )
+
+        assert transports.last.options.polling_interval == 60.0
+        assert len([m for m in logger.messages("warning") if "below the minimum" in m]) == 1
 
     @pytest.mark.parametrize("interval", [60, 60.0, 300, 3_600.5])
     def test_accepts_a_polling_interval_of_at_least_60_seconds(
@@ -758,9 +778,23 @@ class TestConnectionOptions:
 
         assert transports.last.options.polling_interval == interval
 
-    def test_rejects_an_invalid_polling_interval_even_when_streaming(self) -> None:
-        with pytest.raises(ConfigDirectorValidationError, match="polling interval"):
-            _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode="streaming", polling_interval=1))
+    def test_ignores_a_low_polling_interval_without_warning_when_streaming(
+        self, transports: TransportRecorder
+    ) -> None:
+        logger = RecordingLogger()
+
+        client = _ConfigDirectorClient(
+            SDK_KEY, connection=ConnectionOptions(mode="streaming", polling_interval=1), logger=logger
+        )
+
+        assert transports.last.mode == "streaming"
+        assert client.closed is False
+        assert logger.messages("warning") == []
+
+    def test_keeps_the_configured_polling_interval_on_the_options_object(self) -> None:
+        options = ConnectionOptions(mode="polling", polling_interval=10)
+
+        assert options.polling_interval == 10
 
     def test_defaults_match_the_documented_values(self) -> None:
         options = ConnectionOptions()
