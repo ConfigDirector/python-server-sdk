@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import queue
 import threading
 import time
 from collections.abc import Callable
@@ -89,6 +90,7 @@ class FakeConfigDirectorServer:
                 pass
 
         self._bundle = bundle(*configs)
+        self._pushed: queue.Queue[str] = queue.Queue()
         self.available = True
         self.stream_released = threading.Event()
         self.stream_released.set()
@@ -105,6 +107,9 @@ class FakeConfigDirectorServer:
     def url(self) -> str:
         host, port = self._httpd.server_address[:2]
         return f"http://{host!s}:{port!s}"
+
+    def push(self, *configs: dict[str, Any]) -> None:
+        self._pushed.put(bundle(*configs))
 
     def requests_to(self, path: str) -> list[Request]:
         return [request for request in list(self.requests) if request.path == path]
@@ -136,9 +141,15 @@ class FakeConfigDirectorServer:
         try:
             request.wfile.write(f"data: {self._bundle}\n\n".encode())
             request.wfile.flush()
+            while not self._closing.is_set():
+                try:
+                    pushed = self._pushed.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                request.wfile.write(f"data: {pushed}\n\n".encode())
+                request.wfile.flush()
         except OSError:
             return
-        self._closing.wait()
 
 
 def wait_for(condition: Callable[[], bool], timeout: float = 5.0) -> None:

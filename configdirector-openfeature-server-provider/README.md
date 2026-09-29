@@ -57,7 +57,7 @@ new_checkout = client.get_boolean_value("new-checkout", False, context)
 | The value does not match the requested type | `ERROR` | `TYPE_MISMATCH` |
 | No config state has been received yet | `ERROR` | `PROVIDER_NOT_READY` |
 
-If the first config state does not arrive within the configured timeout, initialization still completes and evaluations return their defaults. The provider keeps connecting, and emits `PROVIDER_READY` once config state arrives. It emits `PROVIDER_CONFIGURATION_CHANGED`, with the keys that changed, whenever configs are updated.
+If the first config state does not arrive within the configured timeout, initialization still completes and evaluations return their defaults. The provider keeps connecting, and emits `PROVIDER_READY` once config state arrives. It emits `PROVIDER_CONFIGURATION_CHANGED` whenever configs are updated, with the keys the update carried followed by the keys a full update removed.
 
 ## Documentation
 

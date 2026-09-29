@@ -29,6 +29,7 @@ BundleKind = Literal["full", "delta"]
 class ConfigBundle:
     configs: dict[str, Config] = field(default_factory=dict)
     kind: BundleKind = "full"
+    unreadable_keys: list[str] = field(default_factory=list)
     environment_id: str | None = None
     project_id: str | None = None
     # Echoed back on the next poll so the server can answer with a delta. The server may omit
@@ -41,28 +42,33 @@ def parse_bundle(payload: str, logger: ConfigDirectorLogger) -> ConfigBundle:
     if not isinstance(document, dict):
         raise ValueError(f"Expected the config bundle to be a JSON object, got {type(document).__name__}")
 
+    configs, unreadable_keys = _parse_configs(document.get("configs"), logger)
     return ConfigBundle(
-        configs=_parse_configs(document.get("configs"), logger),
+        configs=configs,
         kind="delta" if document.get("kind") == "delta" else "full",
+        unreadable_keys=unreadable_keys,
         environment_id=_optional_string(document.get("environmentId")),
         project_id=_optional_string(document.get("projectId")),
         timestamp=_optional_string(document.get("timestamp")),
     )
 
 
-def _parse_configs(raw: Any, logger: ConfigDirectorLogger) -> dict[str, Config]:
+def _parse_configs(raw: Any, logger: ConfigDirectorLogger) -> tuple[dict[str, Config], list[str]]:
     if not isinstance(raw, dict):
-        return {}
+        return {}, []
 
     configs: dict[str, Config] = {}
+    unreadable_keys: list[str] = []
     for key, definition in raw.items():
         try:
             configs[str(key)] = _parse_config(definition)
         except (AttributeError, KeyError, TypeError, ValueError) as error:
             # One unreadable config must not cost the application every other config in the
-            # bundle. It keeps whatever definition it already had, or falls back to defaults.
+            # bundle. The client keeps whatever definition it already had, or falls back to
+            # defaults.
             logger.warning("Skipping the config %r, its definition could not be read: %r", key, error)
-    return configs
+            unreadable_keys.append(str(key))
+    return configs, unreadable_keys
 
 
 def _parse_config(raw: Any) -> Config:

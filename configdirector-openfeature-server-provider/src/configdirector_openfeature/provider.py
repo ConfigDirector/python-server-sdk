@@ -181,7 +181,9 @@ class ConfigDirectorProvider(AbstractProvider):
         _evaluated.set(event.evaluation)
 
     def _on_configs_updated(self, event: ConfigsUpdatedEvent) -> None:
-        self.emit_provider_configuration_changed(ProviderEventDetails(flags_changed=list(event.keys)))
+        self.emit_provider_configuration_changed(
+            ProviderEventDetails(flags_changed=[*event.keys, *event.removed_keys])
+        )
 
     def _on_client_ready(self, _event: ClientReadyEvent) -> None:
         with self._lock:

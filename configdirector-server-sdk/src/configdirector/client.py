@@ -247,13 +247,21 @@ class _ConfigDirectorClient(ConfigDirectorClient):
     # -- config state -----------------------------------------------------------------------
 
     def _on_bundle(self, bundle: ConfigBundle) -> None:
+        removed_keys: list[str] = []
         with self._lock:
             if self._closed:
                 return
-            if self._configs is None or bundle.kind == "full":
-                self._configs = dict(bundle.configs)
+            previous = self._configs
+            if previous is None or bundle.kind == "full":
+                replacement = dict(bundle.configs)
+                if previous is not None:
+                    for key in bundle.unreadable_keys:
+                        if key in previous:
+                            replacement[key] = previous[key]
+                    removed_keys = sorted(key for key in previous if key not in replacement)
+                self._configs = replacement
             else:
-                self._configs.update(bundle.configs)
+                previous.update(bundle.configs)
 
             first_bundle = not self._ready
             self._ready = True
@@ -262,12 +270,18 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             watchers = {
                 key: list(entries)
                 for key, entries in self._watchers.items()
-                if entries and key in bundle.configs
+                if entries and (key in bundle.configs or key in removed_keys)
             }
 
         keys = sorted(bundle.configs)
-        self._logger.debug("Config state updated from the server with %d key(s): %r", len(keys), keys)
-        self._emit("configs_updated", ConfigsUpdatedEvent(keys=keys))
+        self._logger.debug(
+            "Config state updated from the server with %d key(s): %r, %d removed: %r",
+            len(keys),
+            keys,
+            len(removed_keys),
+            removed_keys,
+        )
+        self._emit("configs_updated", ConfigsUpdatedEvent(keys=keys, removed_keys=removed_keys))
         self._notify_watchers(watchers, bundle.configs)
 
         if first_bundle:
@@ -276,10 +290,11 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             self._logger.debug("Received the initial payload from the server, the client is ready")
 
     def _notify_watchers(self, watchers: dict[str, list[_Watcher]], configs: dict[str, Config]) -> None:
-        # Evaluated against the bundle rather than the merged state: a watcher only fires for a
-        # key the update carried, and for those two are the same definition.
+        # Evaluated against the bundle rather than the merged state: for a key the update carried
+        # the two hold the same definition, and a removed key has none, so its watchers get the
+        # default.
         for config_key, entries in watchers.items():
-            definition = configs[config_key]
+            definition = configs.get(config_key)
             for watcher in entries:
                 try:
                     value = self._evaluate(config_key, definition, watcher.default, watcher.context)

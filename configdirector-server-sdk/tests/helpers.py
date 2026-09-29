@@ -190,10 +190,16 @@ class TelemetryRecorder:
         return self.last.evaluations
 
 
-def bundle(*configs: Config, kind: BundleKind = "full", timestamp: str | None = None) -> ConfigBundle:
+def bundle(
+    *configs: Config,
+    kind: BundleKind = "full",
+    timestamp: str | None = None,
+    unreadable_keys: Sequence[str] = (),
+) -> ConfigBundle:
     return ConfigBundle(
         configs={config.key: config for config in configs},
         kind=kind,
+        unreadable_keys=list(unreadable_keys),
         environment_id="10000000-0000-0000-0000-000000000000",
         project_id="20000000-0000-0000-0000-000000000000",
         timestamp=timestamp,

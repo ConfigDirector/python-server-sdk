@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any, Literal, Protocol, TypeVar, overload, runtime_checkable
 
@@ -216,10 +216,13 @@ class ConfigsUpdatedEvent:
     """Emitted whenever config definitions are received from the server.
 
     Attributes:
-        keys: The config keys included in the update.
+        keys: The config keys included in the update, sorted.
+        removed_keys: The keys a full update no longer included, so the client stopped serving
+            them, sorted. Empty when nothing was removed, and always empty for a delta update.
     """
 
     keys: list[str]
+    removed_keys: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +236,8 @@ ClientEvent = Literal["client_ready", "configs_updated", "config_evaluated"]
 """The names of the events emitted by the client."""
 
 WatchHandler = Callable[[ConfigValueT], None]
-"""A callback invoked with the new value whenever a watched config changes."""
+"""A callback invoked with the newly evaluated value whenever an update carries the watched
+config, and with the default whenever a full update no longer carries it."""
 
 ClientReadyHandler = Callable[[ClientReadyEvent], None]
 """A handler for the ``client_ready`` event."""
@@ -444,7 +448,8 @@ class ConfigDirectorClient(Protocol):
         callback: WatchHandler[ConfigValueT],
         context: Context | None = None,
     ) -> Subscription:
-        """Call ``callback`` with the new value whenever ``config_key`` changes.
+        """Call ``callback`` with the newly evaluated value whenever an update carries
+        ``config_key``, and with ``default`` whenever a full update no longer carries it.
 
         The callback runs on the SDK's background connection thread rather than the thread that
         registered it, so it should be quick and thread-safe. An exception it raises is logged
@@ -452,9 +457,10 @@ class ConfigDirectorClient(Protocol):
 
         Args:
             config_key: The config key to watch.
-            default: The value passed to the callback when config state is unavailable. Its type
-                also determines the type the config is parsed as.
-            callback: Called with the new value on every change.
+            default: The value passed to the callback when config state is unavailable or the
+                config was removed. Its type also determines the type the config is parsed as.
+            callback: Called with the newly evaluated value on every update that carries or
+                removes ``config_key``.
             context: The user's context, used for targeting rule evaluation.
 
         Returns:

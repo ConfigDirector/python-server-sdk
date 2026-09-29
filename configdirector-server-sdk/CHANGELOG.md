@@ -8,6 +8,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `ConfigsUpdatedEvent.removed_keys`: the keys a full update no longer carried, sorted, so a
+  handler can tell a config that was removed from one that was updated. `keys` still lists only the
+  keys the update carried. The field defaults to an empty list.
+
+### Fixed
+
+- A watch on a config that a full update no longer carries is now called with its default value.
+  Before, the config silently stopped being served and the watch kept its last value.
+- A full update keeps the previous definition of a config whose definition could not be read, as
+  the warning it logs always said. Before, the config was dropped until the next readable update.
+
 ### Changed
 
 - A `polling_interval` below the minimum of 60 seconds (including zero and negative values) is now

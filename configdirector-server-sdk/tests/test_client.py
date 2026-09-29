@@ -340,6 +340,62 @@ class TestConfigUpdates:
         client.initialize()
 
         assert events[0].keys == ["a", "b"]
+        assert events[0].removed_keys == []
+
+    def test_a_full_bundle_reports_the_keys_it_dropped_and_notifies_their_watchers(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        events: list[ConfigsUpdatedEvent] = []
+        reasons: list[str] = []
+        client.on("configs_updated", events.append)
+        client.on("config_evaluated", lambda event: reasons.append(event.evaluation.reason))
+        transports.initial_bundle = bundle(
+            config("first", "one"), config("second", "two"), config("third", "three")
+        )
+        client.initialize()
+        values: list[str] = []
+        client.watch("first", "fallback", values.append)
+
+        transports.last.deliver(bundle(config("second", "changed")))
+
+        assert events[1].keys == ["second"]
+        assert events[1].removed_keys == ["first", "third"]
+        assert values == ["fallback"]
+        assert reasons == ["config-state-missing"]
+        assert client.get_value("first", "gone") == "gone"
+
+    def test_a_delta_bundle_drops_nothing(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        events: list[ConfigsUpdatedEvent] = []
+        client.on("configs_updated", events.append)
+        transports.initial_bundle = bundle(config("first", "one"))
+        client.initialize()
+        values: list[str] = []
+        client.watch("first", "fallback", values.append)
+
+        transports.last.deliver(bundle(config("second", "two"), kind="delta"))
+
+        assert events[1].keys == ["second"]
+        assert events[1].removed_keys == []
+        assert values == []
+
+    def test_a_full_bundle_keeps_the_previous_definition_of_a_config_it_could_not_read(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        events: list[ConfigsUpdatedEvent] = []
+        client.on("configs_updated", events.append)
+        transports.initial_bundle = bundle(config("first", "one"), config("second", "two"))
+        client.initialize()
+        values: list[str] = []
+        client.watch("first", "fallback", values.append)
+
+        transports.last.deliver(bundle(config("second", "changed"), unreadable_keys=["first"]))
+
+        assert events[1].keys == ["second"]
+        assert events[1].removed_keys == []
+        assert values == []
+        assert client.get_value("first", "gone") == "one"
 
     def test_an_update_after_close_is_ignored(
         self, client: _ConfigDirectorClient, transports: TransportRecorder

@@ -221,6 +221,21 @@ class TestLifecycle:
         wait_for(lambda: bool(changes))
         assert changes[0].flags_changed == ["a", "b"]
 
+    def test_announces_removed_flags_after_the_flags_an_update_carried(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve(config("a", "string", "1"), config("b", "string", "2"))
+        changes: list[EventDetails] = []
+        api.get_client().add_handler(ProviderEvent.PROVIDER_CONFIGURATION_CHANGED, changes.append)
+        set_provider_and_wait(provide(server, mode="streaming"))
+        wait_for(lambda: bool(changes))
+
+        server.push(config("a", "string", "3"))
+
+        wait_for(lambda: len(changes) == 2)
+        assert changes[1].flags_changed == ["a", "b"]
+        assert api.get_client().get_string_value("b", "fallback") == "fallback"
+
     def test_reports_not_ready_until_config_state_arrives(
         self, serve: ServerFactory, provide: ProviderFactory
     ) -> None:

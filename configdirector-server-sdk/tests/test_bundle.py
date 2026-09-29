@@ -94,7 +94,11 @@ class TestConfigParsing:
         result = parse_bundle(payload, logger)
 
         assert set(result.configs) == {"greeting"}
+        assert result.unreadable_keys == ["broken"]
         assert any("Skipping the config 'broken'" in m for m in logger.messages("warning"))
+
+    def test_a_bundle_whose_configs_all_read_lists_no_unreadable_keys(self, logger: RecordingLogger) -> None:
+        assert parse_bundle(wire_bundle(wire_config()), logger).unreadable_keys == []
 
     def test_reads_variations(self, logger: RecordingLogger) -> None:
         payload = wire_bundle(
