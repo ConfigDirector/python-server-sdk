@@ -9,6 +9,10 @@ from configdirector._evaluation._json_pointer import find_by_pointer
 from configdirector._evaluation._json_value import to_json_string
 from configdirector._evaluation.date_comparison import compare_date
 
+ELEVEN_ELEMENTS = {
+    "list": ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+}
+
 
 class TestJsonPointer:
     @pytest.mark.parametrize(
@@ -44,6 +48,141 @@ class TestJsonPointer:
     )
     def test_returns_none_when_it_cannot_resolve(self, pointer: str, document: Any) -> None:
         assert find_by_pointer(pointer, document) is None
+
+    def test_a_lone_tilde_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/~", {"~": "found"}) is None
+
+    def test_a_tilde_followed_by_two_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/~2", {"~2": "found"}) is None
+
+    def test_a_tilde_followed_by_a_letter_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/~a", {"~a": "found"}) is None
+
+    def test_a_trailing_tilde_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/a~", {"a~": "found"}) is None
+
+    def test_a_tilde_followed_by_a_tilde_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/~~", {"~~": "found"}) is None
+
+    def test_an_invalid_escape_before_a_valid_one_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/~~1", {"~/": "found"}) is None
+
+    def test_an_invalid_escape_after_a_valid_one_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/~0~2", {"~~2": "found"}) is None
+
+    def test_an_invalid_escape_in_the_first_of_two_tokens_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/a~/b", {"a~": {"b": "found"}}) is None
+
+    def test_an_invalid_escape_in_the_last_of_two_tokens_invalidates_the_pointer(self) -> None:
+        assert find_by_pointer("/a/~2", {"a": {"~2": "found"}}) is None
+
+    def test_an_invalid_escape_invalidates_the_pointer_even_when_later_tokens_resolve(self) -> None:
+        assert find_by_pointer("/~2/b", {"~2": {"b": "found"}}) is None
+
+    def test_tilde_zero_decodes_to_a_tilde(self) -> None:
+        assert find_by_pointer("/~0", {"~": "found"}) == "found"
+
+    def test_tilde_one_decodes_to_a_slash(self) -> None:
+        assert find_by_pointer("/~1", {"/": "found"}) == "found"
+
+    def test_tilde_zero_one_decodes_to_a_tilde_and_a_one(self) -> None:
+        assert find_by_pointer("/~01", {"~1": "found", "/": "wrong"}) == "found"
+
+    def test_tilde_one_zero_decodes_to_a_slash_and_a_zero(self) -> None:
+        assert find_by_pointer("/~10", {"/0": "found", "~0": "wrong"}) == "found"
+
+    def test_repeated_tilde_zero_escapes_decode_to_tildes(self) -> None:
+        assert find_by_pointer("/~0~0", {"~~": "found"}) == "found"
+
+    def test_repeated_tilde_one_escapes_decode_to_slashes(self) -> None:
+        assert find_by_pointer("/~1~1", {"//": "found"}) == "found"
+
+    def test_mixed_escapes_decode_in_place(self) -> None:
+        assert find_by_pointer("/a~0b~1c", {"a~b/c": "found"}) == "found"
+
+    def test_escapes_decode_in_every_token(self) -> None:
+        assert find_by_pointer("/~1/~0", {"/": {"~": "found"}}) == "found"
+
+    def test_percent_encoding_is_not_decoded(self) -> None:
+        assert find_by_pointer("/%25", {"%25": "found", "%": "wrong"}) == "found"
+
+    def test_an_array_index_of_zero_selects_the_first_element(self) -> None:
+        assert find_by_pointer("/list/0", ELEVEN_ELEMENTS) == "zero"
+
+    def test_a_multi_digit_array_index_selects_its_element(self) -> None:
+        assert find_by_pointer("/list/10", ELEVEN_ELEMENTS) == "ten"
+
+    def test_an_array_index_equal_to_the_length_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/11", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_with_a_leading_zero_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/01", ELEVEN_ELEMENTS) is None
+
+    def test_a_double_zero_array_index_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/00", ELEVEN_ELEMENTS) is None
+
+    def test_a_multi_digit_array_index_with_a_leading_zero_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/010", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_with_a_plus_sign_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/+1", ELEVEN_ELEMENTS) is None
+
+    def test_a_negative_zero_array_index_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/-0", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_with_a_leading_space_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/ 1", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_with_a_trailing_space_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/1 ", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_with_a_leading_tab_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/\t1", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_with_a_trailing_newline_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/1\n", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_with_an_underscore_separator_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/1_0", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_in_arabic_indic_digits_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/\u0661", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_ending_in_a_non_ascii_digit_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/1\u0660", ELEVEN_ELEMENTS) is None
+
+    def test_an_array_index_in_fullwidth_digits_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/\uff11", ELEVEN_ELEMENTS) is None
+
+    def test_a_decimal_array_index_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/1.0", ELEVEN_ELEMENTS) is None
+
+    def test_an_exponent_array_index_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/1e0", ELEVEN_ELEMENTS) is None
+
+    def test_the_past_the_end_array_token_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/-", ELEVEN_ELEMENTS) is None
+
+    def test_an_empty_array_token_selects_nothing(self) -> None:
+        assert find_by_pointer("/list/", ELEVEN_ELEMENTS) is None
+
+    def test_a_numeric_token_selects_an_object_member_by_name(self) -> None:
+        assert find_by_pointer("/01", {"01": "found", "1": "wrong"}) == "found"
+
+    def test_a_numeric_token_does_not_select_a_non_string_object_key(self) -> None:
+        assert find_by_pointer("/0", {0: "wrong"}) is None
+
+    def test_a_string_is_not_indexed_by_character(self) -> None:
+        assert find_by_pointer("/text/0", {"text": "abc"}) is None
+
+    def test_a_boolean_is_not_traversed(self) -> None:
+        assert find_by_pointer("/flag/0", {"flag": True}) is None
+
+    def test_a_number_is_not_traversed(self) -> None:
+        assert find_by_pointer("/count/0", {"count": 1}) is None
+
+    def test_a_tuple_is_not_traversed_as_an_array(self) -> None:
+        assert find_by_pointer("/pair/0", {"pair": ("first", "second")}) is None
 
 
 class TestToJsonString:

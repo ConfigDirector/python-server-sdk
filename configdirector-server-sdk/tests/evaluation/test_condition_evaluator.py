@@ -304,6 +304,27 @@ class TestTextComparisonConditions:
 
             assert evaluate_condition(c, traits({"x": value})) is True
 
+    class TestComparisonsAreCaseSensitive:
+        @pytest.mark.parametrize(
+            ("operator", "target", "expected"),
+            [
+                ("equals", "premium", False),
+                ("does NOT equal", "premium", True),
+                ("is one of", "premium", False),
+                ("is NOT one of", "premium", True),
+                ("starts with any of", "pre", False),
+                ("does NOT start with any of", "pre", True),
+                ("ends with any of", "IUM", False),
+                ("does NOT end with any of", "IUM", True),
+            ],
+        )
+        def test_a_differently_cased_target_does_not_match(
+            self, operator: str, target: str, expected: bool
+        ) -> None:
+            c = condition(operator, [target], attribute="traits", trait="/plan")
+
+            assert evaluate_condition(c, traits({"plan": "Premium"})) is expected
+
 
 class TestNumberComparisonConditions:
     @pytest.mark.parametrize("operator", ["=", "equals"])
@@ -689,6 +710,14 @@ class TestArrayComparisonConditions:
             c = condition("contains any of", [""], target_type="array", attribute="traits", trait="/tags")
 
             assert evaluate_condition(c, traits({"tags": [["a"], {"k": "v"}, None]})) is False
+
+    @pytest.mark.parametrize(
+        ("operator", "expected"), [("contains any of", False), ("does NOT contain any of", True)]
+    )
+    def test_compares_elements_case_sensitively(self, operator: str, expected: bool) -> None:
+        c = condition(operator, ["blue"], target_type="array", attribute="traits", trait="/tags")
+
+        assert evaluate_condition(c, traits({"tags": ["Blue", "RED"]})) is expected
 
 
 class TestEdgeCases:
