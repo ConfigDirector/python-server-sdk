@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from configdirector._bundle import parse_bundle
+from configdirector._bundle import NotAConfigBundleError, parse_bundle
 from configdirector._evaluation import (
     ConditionalRule,
     EnumTypeConstraints,
@@ -74,8 +74,22 @@ class TestBundleEnvelope:
         with pytest.raises(ValueError, match="Expecting"):
             parse_bundle("{not json", logger)
 
-    def test_a_bundle_without_configs_is_empty(self, logger: RecordingLogger) -> None:
-        assert parse_bundle(json.dumps({"kind": "full"}), logger).configs == {}
+    def test_a_document_without_configs_is_not_a_config_bundle(self, logger: RecordingLogger) -> None:
+        with pytest.raises(NotAConfigBundleError):
+            parse_bundle(json.dumps({"kind": "full"}), logger)
+
+    def test_a_document_whose_configs_are_not_an_object_is_not_a_config_bundle(
+        self, logger: RecordingLogger
+    ) -> None:
+        with pytest.raises(NotAConfigBundleError):
+            parse_bundle(json.dumps({"kind": "delta", "configs": []}), logger)
+
+    def test_not_a_config_bundle_is_a_value_error(self, logger: RecordingLogger) -> None:
+        with pytest.raises(ValueError, match="configs"):
+            parse_bundle(json.dumps({"type": "heartbeat"}), logger)
+
+    def test_an_explicitly_empty_configs_object_is_an_empty_bundle(self, logger: RecordingLogger) -> None:
+        assert parse_bundle(json.dumps({"kind": "full", "configs": {}}), logger).configs == {}
 
 
 class TestConfigParsing:

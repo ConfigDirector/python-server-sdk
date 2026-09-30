@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import uuid
 
-from .._bundle import parse_bundle
+from .._bundle import NotAConfigBundleError, parse_bundle
 from .._eventsource import EventSourceClient, EventSourceMessage, ReadyState, ReconnectionState
 from ..errors import ConfigDirectorConnectionError
 from .base import (
@@ -175,6 +175,11 @@ class StreamingTransport:
     def _on_message(self, message: EventSourceMessage) -> None:
         try:
             bundle = parse_bundle(message.data, self._logger)
+        except NotAConfigBundleError as error:
+            self._logger.debug(
+                "[StreamingTransport] Skipping a message that is not a config bundle: %r", error
+            )
+            return
         except ValueError as error:
             self._logger.error("[StreamingTransport] Error parsing a config update: %r", error)
             return

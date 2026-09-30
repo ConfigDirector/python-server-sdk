@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- A payload without a `configs` object is no longer applied as an empty config set. Before, such a
+  document arriving as a full update wiped every config until the next full update, and before the
+  first update it marked the client ready with no configs at all. The streaming transport now skips
+  such a message with a debug log, as the Java and .NET SDKs do, and the polling transport reports
+  it as a failed poll and keeps polling. An explicit `"configs": {}` is still an empty environment.
 - A watch on a config that a full update no longer carries is now called with its default value.
   Before, the config silently stopped being served and the watch kept its last value.
 - A full update keeps the previous definition of a config whose definition could not be read, as

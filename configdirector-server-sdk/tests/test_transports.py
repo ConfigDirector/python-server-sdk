@@ -305,6 +305,44 @@ class TestPollingTransport:
 
         assert "unrecoverable" not in str(raised.value)
 
+    def test_a_first_response_without_configs_is_reported_and_leaves_polling_running(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        server = serve(lambda request: respond(request, 200, json.dumps({"kind": "full"})))
+        transport = PollingTransport(options(server.url, sink, logger, polling_interval=0.02))
+
+        try:
+            with pytest.raises(ConfigDirectorConnectionError, match="Failed to parse the response"):
+                transport.connect(5.0)
+
+            assert wait_for(lambda: len(server.requests) >= 2)
+        finally:
+            transport.close()
+
+        assert sink.bundles == []
+
+    def test_a_later_response_without_configs_leaves_the_delivered_bundle_alone(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        responses = iter([bundle_json("greeting"), json.dumps({"kind": "full"})])
+
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            respond(request, 200, next(responses, json.dumps({"kind": "full"})))
+
+        server = serve(handle)
+        transport = PollingTransport(options(server.url, sink, logger, polling_interval=0.02))
+
+        try:
+            transport.connect(5.0)
+            assert wait_for(lambda: len(server.requests) >= 2)
+            assert wait_for(
+                lambda: any("Failed to parse the response" in m for m in logger.messages("error"))
+            )
+        finally:
+            transport.close()
+
+        assert sink.keys == [["greeting"]]
+
     def test_a_malformed_response_body_is_reported(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
     ) -> None:
@@ -488,6 +526,30 @@ class TestStreamingTransport:
 
         assert sink.keys == [["greeting"]]
         assert any("Error parsing a config update" in m for m in logger.messages("error"))
+
+    def test_a_message_without_configs_is_skipped_quietly(
+        self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger
+    ) -> None:
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            sse_headers(request)
+            request.wfile.write(f"data: {bundle_json('greeting')}\n\n".encode())
+            request.wfile.write(b'data: {"type":"heartbeat"}\n\n')
+            request.wfile.write(b'data: {"kind":"delta"}\n\n')
+            request.wfile.write(f"data: {bundle_json('other')}\n\n".encode())
+            request.wfile.flush()
+
+        server = serve(handle)
+        transport = StreamingTransport(options(server.url, sink, logger))
+
+        try:
+            transport.connect(5.0)
+            assert wait_for(lambda: len(sink.bundles) == 2)
+        finally:
+            transport.close()
+
+        assert sink.keys == [["greeting"], ["other"]]
+        assert logger.messages("error") == []
+        assert sum("not a config bundle" in m for m in logger.messages("debug")) == 2
 
     def test_a_client_error_status_is_unrecoverable(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger

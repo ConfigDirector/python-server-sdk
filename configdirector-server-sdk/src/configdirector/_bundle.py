@@ -20,9 +20,13 @@ from ._evaluation.types import (
 )
 from .types import ConfigDirectorLogger, ConfigType
 
-__all__ = ["BundleKind", "ConfigBundle", "parse_bundle"]
+__all__ = ["BundleKind", "ConfigBundle", "NotAConfigBundleError", "parse_bundle"]
 
 BundleKind = Literal["full", "delta"]
+
+
+class NotAConfigBundleError(ValueError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +46,13 @@ def parse_bundle(payload: str, logger: ConfigDirectorLogger) -> ConfigBundle:
     if not isinstance(document, dict):
         raise ValueError(f"Expected the config bundle to be a JSON object, got {type(document).__name__}")
 
-    configs, unreadable_keys = _parse_configs(document.get("configs"), logger)
+    raw_configs = document.get("configs")
+    if not isinstance(raw_configs, dict):
+        raise NotAConfigBundleError(
+            f"Expected the config bundle to carry a 'configs' object, got {type(raw_configs).__name__}"
+        )
+
+    configs, unreadable_keys = _parse_configs(raw_configs, logger)
     return ConfigBundle(
         configs=configs,
         kind="delta" if document.get("kind") == "delta" else "full",
@@ -53,10 +63,7 @@ def parse_bundle(payload: str, logger: ConfigDirectorLogger) -> ConfigBundle:
     )
 
 
-def _parse_configs(raw: Any, logger: ConfigDirectorLogger) -> tuple[dict[str, Config], list[str]]:
-    if not isinstance(raw, dict):
-        return {}, []
-
+def _parse_configs(raw: dict[Any, Any], logger: ConfigDirectorLogger) -> tuple[dict[str, Config], list[str]]:
     configs: dict[str, Config] = {}
     unreadable_keys: list[str] = []
     for key, definition in raw.items():
