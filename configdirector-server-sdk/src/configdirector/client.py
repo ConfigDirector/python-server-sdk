@@ -19,11 +19,13 @@ from ._telemetry import (
     MIN_EVENT_QUEUE_LIMIT,
     TelemetryCollector,
     TelemetryCollectorOptions,
+    TelemetryProtocol,
     value_id_for,
 )
 from ._transport import (
     DEFAULT_POLLING_INTERVAL,
     MIN_POLLING_INTERVAL,
+    Transport,
     TransportOptions,
     create_transport,
 )
@@ -90,6 +92,10 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             Ignored when ``logger`` is supplied.
         telemetry: Telemetry queue and flush tuning.
         hooks: Event handlers to attach before the client can emit any event.
+        transport_factory: Builds the transport from its options. Defaults to the transport of
+            ``connection.mode``.
+        telemetry_factory: Builds the telemetry collector from its options. Defaults to the
+            collector that reports evaluations to ConfigDirector.
 
     Raises:
         ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
@@ -107,6 +113,8 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         telemetry: TelemetryOptions | None = None,
         hooks: ClientHooks | None = None,
         sdk_identity: SdkIdentity = SERVER_SDK_IDENTITY,
+        transport_factory: Callable[[TransportOptions], Transport] | None = None,
+        telemetry_factory: Callable[[TelemetryCollectorOptions], TelemetryProtocol] | None = None,
     ) -> None:
         self._logger = logger if logger is not None else get_default_logger(log_level)
         if _is_blank(server_sdk_key):
@@ -138,8 +146,8 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         self._ready_event = threading.Event()
         self._evaluator = ConfigEvaluator(self._logger)
         meta_context = _meta_context(self._metadata, self._sdk_identity)
-        self._transport = create_transport(
-            self._connection.mode,
+        build_transport = transport_factory if transport_factory is not None else self._create_transport
+        self._transport = build_transport(
             TransportOptions(
                 server_sdk_key=server_sdk_key,
                 base_url=self._base_url,
@@ -163,7 +171,8 @@ class _ConfigDirectorClient(ConfigDirectorClient):
 
         # Built last, and deliberately so: it starts a background flush thread, which would
         # outlive the client if anything above this line raised.
-        self._telemetry = TelemetryCollector(
+        build_telemetry = telemetry_factory if telemetry_factory is not None else TelemetryCollector
+        self._telemetry: TelemetryProtocol = build_telemetry(
             TelemetryCollectorOptions(
                 server_sdk_key=server_sdk_key,
                 base_url=self._base_url,
@@ -175,6 +184,9 @@ class _ConfigDirectorClient(ConfigDirectorClient):
                 flush_interval=self._telemetry_options.flush_interval,
             )
         )
+
+    def _create_transport(self, options: TransportOptions) -> Transport:
+        return create_transport(self._connection.mode, options)
 
     # -- lifecycle --------------------------------------------------------------------
 

@@ -10,6 +10,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `configdirector.testing`, with `create_test_client` returning a `TestClient` whose `client` is a
+  real `ConfigDirectorClient` connected to an in-memory server that the test controls:
+  `set_value`, `remove_value`, `replace_values`, `hold_initialization`, `complete_initialization`,
+  and `fail_initialization`. No network connection is opened, no telemetry is sent, and no thread
+  is started.
 - `ConfigsUpdatedEvent.removed_keys`: the keys a full update no longer carried, sorted, so a
   handler can tell a config that was removed from one that was updated. `keys` still lists only the
   keys the update carried. The field defaults to an empty list.

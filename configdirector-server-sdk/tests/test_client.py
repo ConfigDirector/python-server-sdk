@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 
-import configdirector.client
 from configdirector import (
     ClientHooks,
     ConfigDirectorConnectionError,
@@ -20,11 +19,12 @@ from configdirector import (
     Subscription,
     TelemetryOptions,
 )
-from configdirector._telemetry import TelemetryCollector
 from configdirector._telemetry.value_id import VALUE_ID_LENGTH, generate_value_id
+from configdirector._transport import PollingTransport, StreamingTransport
 from configdirector._version import SERVER_SDK_IDENTITY, __version__
 from configdirector.client import _ConfigDirectorClient
 from tests.helpers import (
+    ClientBuilder,
     RecordedEvaluation,
     RecordingLogger,
     TelemetryRecorder,
@@ -39,8 +39,8 @@ SDK_KEY = "test-server-sdk-key"
 
 
 @pytest.fixture
-def client() -> _ConfigDirectorClient:
-    return _ConfigDirectorClient(SDK_KEY)
+def client(build: ClientBuilder) -> _ConfigDirectorClient:
+    return build(SDK_KEY)
 
 
 @pytest.fixture
@@ -64,8 +64,10 @@ class TestInitialize:
 
         assert transports.last.connect_timeouts == [0.5]
 
-    def test_falls_back_to_the_configured_timeout(self, transports: TransportRecorder) -> None:
-        client = _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(timeout=7.5))
+    def test_falls_back_to_the_configured_timeout(
+        self, build: ClientBuilder, transports: TransportRecorder
+    ) -> None:
+        client = build(SDK_KEY, connection=ConnectionOptions(timeout=7.5))
 
         client.initialize()
 
@@ -100,21 +102,23 @@ class TestInitialize:
 
         assert client.is_ready is False
 
-    def test_warns_when_initialization_times_out(self, transports: TransportRecorder) -> None:
+    def test_warns_when_initialization_times_out(
+        self, build: ClientBuilder, transports: TransportRecorder
+    ) -> None:
         transports.initial_bundle = None
         logger = RecordingLogger()
-        client = _ConfigDirectorClient(SDK_KEY, logger=logger)
+        client = build(SDK_KEY, logger=logger)
 
         client.initialize(timeout=0.05)
 
         assert any("Timed out waiting for initialization" in m for m in logger.messages("warning"))
 
     def test_an_unrecoverable_connection_error_is_logged_not_raised(
-        self, transports: TransportRecorder
+        self, build: ClientBuilder, transports: TransportRecorder
     ) -> None:
         transports.connect_error = ConfigDirectorConnectionError("Unauthorized", 401)
         logger = RecordingLogger()
-        client = _ConfigDirectorClient(SDK_KEY, logger=logger)
+        client = build(SDK_KEY, logger=logger)
 
         client.initialize()
 
@@ -122,17 +126,19 @@ class TestInitialize:
         assert any("error occurred during initialization" in m for m in logger.messages("error"))
 
     def test_sends_the_sdk_identity_and_metadata_to_the_transport(
-        self, transports: TransportRecorder
+        self, build: ClientBuilder, transports: TransportRecorder
     ) -> None:
-        _ConfigDirectorClient(SDK_KEY, metadata=Metadata(app_name="checkout", app_version="2.1.0"))
+        build(SDK_KEY, metadata=Metadata(app_name="checkout", app_version="2.1.0"))
 
         meta_context = transports.last.options.meta_context
         assert meta_context["sdkName"] == "python-server-sdk"
         assert meta_context["appName"] == "checkout"
         assert meta_context["appVersion"] == "2.1.0"
 
-    def test_omits_metadata_that_was_not_supplied(self, transports: TransportRecorder) -> None:
-        _ConfigDirectorClient(SDK_KEY)
+    def test_omits_metadata_that_was_not_supplied(
+        self, build: ClientBuilder, transports: TransportRecorder
+    ) -> None:
+        build(SDK_KEY)
 
         assert set(transports.last.options.meta_context) == {"sdkName", "sdkVersion"}
 
@@ -215,7 +221,9 @@ class TestGetValue:
         assert client.get_value("greeting", "fallback", Context(name="Ada")) == "bonjour"
         assert client.get_value("greeting", "fallback", Context(name="Bob")) == "hello"
 
-    def test_evaluates_against_the_client_metadata(self, transports: TransportRecorder) -> None:
+    def test_evaluates_against_the_client_metadata(
+        self, build: ClientBuilder, transports: TransportRecorder
+    ) -> None:
         transports.initial_bundle = bundle(
             config(
                 "greeting",
@@ -223,7 +231,7 @@ class TestGetValue:
                 rules=[conditional_rule("beta", condition("appName", "equals", "checkout"))],
             )
         )
-        client = _ConfigDirectorClient(SDK_KEY, metadata=Metadata(app_name="checkout"))
+        client = build(SDK_KEY, metadata=Metadata(app_name="checkout"))
 
         client.initialize()
 
@@ -523,9 +531,11 @@ class TestWatch:
 
         assert values == []
 
-    def test_a_raising_watcher_does_not_stop_the_others(self, transports: TransportRecorder) -> None:
+    def test_a_raising_watcher_does_not_stop_the_others(
+        self, build: ClientBuilder, transports: TransportRecorder
+    ) -> None:
         logger = RecordingLogger()
-        client = _ConfigDirectorClient(SDK_KEY, logger=logger)
+        client = build(SDK_KEY, logger=logger)
         client.initialize()
         values: list[str] = []
 
@@ -696,10 +706,12 @@ class TestEvents:
         assert client.is_ready is True
         assert calls == ["second"]
 
-    def test_hooks_receive_events_emitted_during_initialization(self, transports: TransportRecorder) -> None:
+    def test_hooks_receive_events_emitted_during_initialization(
+        self, build: ClientBuilder, transports: TransportRecorder
+    ) -> None:
         transports.initial_bundle = bundle(config("greeting", "hello"))
         events: list[ConfigsUpdatedEvent] = []
-        client = _ConfigDirectorClient(SDK_KEY, hooks=ClientHooks(configs_updated=events.append))
+        client = build(SDK_KEY, hooks=ClientHooks(configs_updated=events.append))
 
         client.initialize()
 
@@ -727,10 +739,10 @@ class TestClose:
 
         assert transports.last.closed is True
 
-    def test_each_client_owns_its_connection_pool(self) -> None:
+    def test_each_client_owns_its_connection_pool(self, build: ClientBuilder) -> None:
         # A pool shared across clients would let one client's close() drop connections another
         # is still using.
-        assert _ConfigDirectorClient(SDK_KEY)._http is not _ConfigDirectorClient(SDK_KEY)._http
+        assert build(SDK_KEY)._http is not build(SDK_KEY)._http
 
     def test_close_releases_the_connection_pool(self, ready_client: _ConfigDirectorClient) -> None:
         pool = ready_client._http._pool
@@ -747,16 +759,16 @@ class TestClose:
 
         assert ready_client.is_ready is False
 
-    def test_the_client_initializes_on_enter_and_closes_on_exit(self) -> None:
-        with _ConfigDirectorClient(SDK_KEY) as client:
+    def test_the_client_initializes_on_enter_and_closes_on_exit(self, build: ClientBuilder) -> None:
+        with build(SDK_KEY) as client:
             ready_inside_the_block = client.is_ready
 
         assert ready_inside_the_block is True
         assert client.is_ready is False
         assert client.closed is True
 
-    def test_entering_an_initialized_client_does_not_re_initialize(self) -> None:
-        client = _ConfigDirectorClient(SDK_KEY)
+    def test_entering_an_initialized_client_does_not_re_initialize(self, build: ClientBuilder) -> None:
+        client = build(SDK_KEY)
         calls: list[str] = []
         client.on("client_ready", lambda _event: calls.append("ready"))
         client.initialize()
@@ -766,8 +778,8 @@ class TestClose:
 
         assert calls == ["ready"]
 
-    def test_closes_even_when_the_block_raises(self) -> None:
-        client = _ConfigDirectorClient(SDK_KEY)
+    def test_closes_even_when_the_block_raises(self, build: ClientBuilder) -> None:
+        client = build(SDK_KEY)
 
         try:
             with client:
@@ -779,32 +791,38 @@ class TestClose:
 
 
 class TestConnectionOptions:
-    @pytest.mark.parametrize("mode", ["streaming", "polling"])
-    def test_supports_every_connection_mode(self, mode: Any, transports: TransportRecorder) -> None:
-        client = _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode=mode))
-        client.initialize()
+    @pytest.mark.parametrize(
+        ("mode", "transport_type"), [("streaming", StreamingTransport), ("polling", PollingTransport)]
+    )
+    def test_supports_every_connection_mode(
+        self, mode: Any, transport_type: type[object], telemetry: TelemetryRecorder
+    ) -> None:
+        client = _ConfigDirectorClient(
+            SDK_KEY, connection=ConnectionOptions(mode=mode), telemetry_factory=telemetry
+        )
 
-        assert client.is_ready is True
-        assert transports.last.mode == mode
+        assert isinstance(client._transport, transport_type)
 
-    def test_passes_the_polling_interval_to_the_transport(self, transports: TransportRecorder) -> None:
-        _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=90))
+    def test_passes_the_polling_interval_to_the_transport(
+        self, build: ClientBuilder, transports: TransportRecorder
+    ) -> None:
+        build(SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=90))
 
         assert transports.last.options.polling_interval == 90
 
-    def test_defaults_the_polling_interval_to_5_minutes(self, transports: TransportRecorder) -> None:
-        _ConfigDirectorClient(SDK_KEY, connection=ConnectionOptions(mode="polling"))
+    def test_defaults_the_polling_interval_to_5_minutes(
+        self, build: ClientBuilder, transports: TransportRecorder
+    ) -> None:
+        build(SDK_KEY, connection=ConnectionOptions(mode="polling"))
 
         assert transports.last.options.polling_interval == 300.0
 
     def test_raises_a_polling_interval_below_60_seconds_to_the_minimum_with_one_warning(
-        self, transports: TransportRecorder
+        self, build: ClientBuilder, transports: TransportRecorder
     ) -> None:
         logger = RecordingLogger()
 
-        _ConfigDirectorClient(
-            SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=10), logger=logger
-        )
+        build(SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=10), logger=logger)
 
         assert transports.last.options.polling_interval == 60.0
         assert logger.messages("warning") == [
@@ -813,37 +831,32 @@ class TestConnectionOptions:
 
     @pytest.mark.parametrize("interval", [0, -1.0, 59.9])
     def test_raises_a_zero_or_negative_polling_interval_to_the_minimum(
-        self, interval: float, transports: TransportRecorder
+        self, build: ClientBuilder, interval: float, transports: TransportRecorder
     ) -> None:
         logger = RecordingLogger()
 
-        _ConfigDirectorClient(
-            SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=interval), logger=logger
-        )
+        build(SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=interval), logger=logger)
 
         assert transports.last.options.polling_interval == 60.0
         assert len([m for m in logger.messages("warning") if "below the minimum" in m]) == 1
 
     @pytest.mark.parametrize("interval", [60, 60.0, 300, 3_600.5])
     def test_accepts_a_polling_interval_of_at_least_60_seconds(
-        self, interval: float, transports: TransportRecorder
+        self, build: ClientBuilder, interval: float, transports: TransportRecorder
     ) -> None:
-        _ConfigDirectorClient(
-            SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=interval)
-        )
+        build(SDK_KEY, connection=ConnectionOptions(mode="polling", polling_interval=interval))
 
         assert transports.last.options.polling_interval == interval
 
     def test_ignores_a_low_polling_interval_without_warning_when_streaming(
-        self, transports: TransportRecorder
+        self, build: ClientBuilder, transports: TransportRecorder
     ) -> None:
         logger = RecordingLogger()
 
-        client = _ConfigDirectorClient(
+        client = build(
             SDK_KEY, connection=ConnectionOptions(mode="streaming", polling_interval=1), logger=logger
         )
 
-        assert transports.last.mode == "streaming"
         assert client.closed is False
         assert logger.messages("warning") == []
 
@@ -930,8 +943,10 @@ class TestTelemetry:
 
         assert telemetry.evaluations == []
 
-    def test_the_collector_is_built_from_the_client_configuration(self, telemetry: TelemetryRecorder) -> None:
-        _ConfigDirectorClient(
+    def test_the_collector_is_built_from_the_client_configuration(
+        self, build: ClientBuilder, telemetry: TelemetryRecorder
+    ) -> None:
+        build(
             SDK_KEY,
             connection=ConnectionOptions(url="https://proxy.example.com"),
             telemetry=TelemetryOptions(event_queue_limit=250, flush_interval=10.0),
@@ -943,17 +958,19 @@ class TestTelemetry:
         assert options.event_queue_limit == 250
         assert options.flush_interval == 10.0
 
-    def test_the_collector_reports_under_the_sdk_identity(self, telemetry: TelemetryRecorder) -> None:
-        _ConfigDirectorClient(SDK_KEY)
+    def test_the_collector_reports_under_the_sdk_identity(
+        self, build: ClientBuilder, telemetry: TelemetryRecorder
+    ) -> None:
+        build(SDK_KEY)
 
         assert telemetry.last.options.sdk_identity == SERVER_SDK_IDENTITY
         assert SERVER_SDK_IDENTITY.sdk_name == "python-server-sdk"
         assert SERVER_SDK_IDENTITY.sdk_version == __version__
 
     def test_the_collector_reports_the_meta_context_the_transport_sends(
-        self, transports: TransportRecorder, telemetry: TelemetryRecorder
+        self, build: ClientBuilder, transports: TransportRecorder, telemetry: TelemetryRecorder
     ) -> None:
-        _ConfigDirectorClient(SDK_KEY, metadata=Metadata(app_name="app", app_version="1.2.3"))
+        build(SDK_KEY, metadata=Metadata(app_name="app", app_version="1.2.3"))
 
         meta_context = telemetry.last.options.meta_context
         assert meta_context["appName"] == "app"
@@ -969,18 +986,22 @@ class TestTelemetry:
         assert telemetry.last.closed is True
 
     @pytest.mark.parametrize("limit", [0, 99, 100_001])
-    def test_rejects_an_event_queue_limit_outside_the_documented_range(self, limit: int) -> None:
+    def test_rejects_an_event_queue_limit_outside_the_documented_range(
+        self, build: ClientBuilder, limit: int
+    ) -> None:
         with pytest.raises(ConfigDirectorValidationError, match="event queue limit"):
-            _ConfigDirectorClient(SDK_KEY, telemetry=TelemetryOptions(event_queue_limit=limit))
+            build(SDK_KEY, telemetry=TelemetryOptions(event_queue_limit=limit))
 
     @pytest.mark.parametrize("limit", [100, 5_000, 100_000])
-    def test_accepts_an_event_queue_limit_within_the_documented_range(self, limit: int) -> None:
-        _ConfigDirectorClient(SDK_KEY, telemetry=TelemetryOptions(event_queue_limit=limit))
+    def test_accepts_an_event_queue_limit_within_the_documented_range(
+        self, build: ClientBuilder, limit: int
+    ) -> None:
+        build(SDK_KEY, telemetry=TelemetryOptions(event_queue_limit=limit))
 
     @pytest.mark.parametrize("interval", [0, -1.0])
-    def test_rejects_a_non_positive_flush_interval(self, interval: float) -> None:
+    def test_rejects_a_non_positive_flush_interval(self, build: ClientBuilder, interval: float) -> None:
         with pytest.raises(ConfigDirectorValidationError, match="flush interval"):
-            _ConfigDirectorClient(SDK_KEY, telemetry=TelemetryOptions(flush_interval=interval))
+            build(SDK_KEY, telemetry=TelemetryOptions(flush_interval=interval))
 
     def test_defaults_match_the_documented_values(self) -> None:
         options = TelemetryOptions()
@@ -989,14 +1010,16 @@ class TestTelemetry:
         assert options.flush_interval == 30.0
 
     def test_a_construction_that_fails_leaves_no_flush_thread_behind(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, transports: TransportRecorder
     ) -> None:
         # The collector starts a background thread, so it must not be built until nothing else
         # in the constructor can still raise.
-        monkeypatch.setattr(configdirector.client, "TelemetryCollector", TelemetryCollector)
-
         with pytest.raises(ConfigDirectorTypeError):
-            _ConfigDirectorClient(SDK_KEY, hooks=ClientHooks(client_ready="not callable"))  # type: ignore[arg-type]
+            _ConfigDirectorClient(
+                SDK_KEY,
+                hooks=ClientHooks(client_ready="not callable"),  # type: ignore[arg-type]
+                transport_factory=transports,
+            )
 
         assert not any(t.name == "configdirector-telemetry" for t in threading.enumerate())
 

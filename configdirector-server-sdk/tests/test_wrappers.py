@@ -31,11 +31,16 @@ def installed_versions(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
 
 class TestWrapperIdentity:
     def test_reports_the_wrapper_name_and_its_installed_version_to_the_transport(
-        self, transports: TransportRecorder, installed_versions: dict[str, str]
+        self, transports: TransportRecorder, telemetry: TelemetryRecorder, installed_versions: dict[str, str]
     ) -> None:
         installed_versions[PROVIDER_DISTRIBUTION] = "4.5.6"
 
-        create_wrapped_client(Wrapper.OPENFEATURE_SERVER_PROVIDER, SDK_KEY)
+        create_wrapped_client(
+            Wrapper.OPENFEATURE_SERVER_PROVIDER,
+            SDK_KEY,
+            transport_factory=transports,
+            telemetry_factory=telemetry,
+        )
 
         options = transports.last.options
         assert options.meta_context["sdkName"] == PROVIDER_NAME
@@ -43,24 +48,40 @@ class TestWrapperIdentity:
         assert options.sdk_identity == SdkIdentity(sdk_name=PROVIDER_NAME, sdk_version="4.5.6")
 
     def test_reports_the_wrapper_identity_to_telemetry(
-        self, telemetry: TelemetryRecorder, installed_versions: dict[str, str]
+        self, transports: TransportRecorder, telemetry: TelemetryRecorder, installed_versions: dict[str, str]
     ) -> None:
         installed_versions[PROVIDER_DISTRIBUTION] = "4.5.6"
 
-        create_wrapped_client(Wrapper.OPENFEATURE_SERVER_PROVIDER, SDK_KEY)
+        create_wrapped_client(
+            Wrapper.OPENFEATURE_SERVER_PROVIDER,
+            SDK_KEY,
+            transport_factory=transports,
+            telemetry_factory=telemetry,
+        )
 
         assert telemetry.last.options.sdk_identity == SdkIdentity(sdk_name=PROVIDER_NAME, sdk_version="4.5.6")
 
     def test_reports_a_development_version_when_the_wrapper_is_not_installed(
-        self, transports: TransportRecorder, installed_versions: dict[str, str]
+        self, transports: TransportRecorder, telemetry: TelemetryRecorder, installed_versions: dict[str, str]
     ) -> None:
-        create_wrapped_client(Wrapper.OPENFEATURE_SERVER_PROVIDER, SDK_KEY)
+        create_wrapped_client(
+            Wrapper.OPENFEATURE_SERVER_PROVIDER,
+            SDK_KEY,
+            transport_factory=transports,
+            telemetry_factory=telemetry,
+        )
 
         assert transports.last.options.meta_context["sdkVersion"] == "0.0.0-dev"
 
-    def test_passes_the_client_options_through(self, transports: TransportRecorder) -> None:
+    def test_passes_the_client_options_through(
+        self, transports: TransportRecorder, telemetry: TelemetryRecorder
+    ) -> None:
         create_wrapped_client(
-            Wrapper.OPENFEATURE_SERVER_PROVIDER, SDK_KEY, metadata=Metadata(app_name="checkout")
+            Wrapper.OPENFEATURE_SERVER_PROVIDER,
+            SDK_KEY,
+            metadata=Metadata(app_name="checkout"),
+            transport_factory=transports,
+            telemetry_factory=telemetry,
         )
 
         assert transports.last.options.meta_context["appName"] == "checkout"

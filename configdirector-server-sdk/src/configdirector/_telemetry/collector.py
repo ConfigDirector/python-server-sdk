@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from .._http import HttpClient
 from .._version import SdkIdentity
@@ -20,6 +21,7 @@ __all__ = [
     "MIN_EVENT_QUEUE_LIMIT",
     "TelemetryCollector",
     "TelemetryCollectorOptions",
+    "TelemetryProtocol",
 ]
 
 DEFAULT_EVENT_QUEUE_LIMIT = 5_000
@@ -53,6 +55,23 @@ class TelemetryCollectorOptions:
     initial_flush_delay: float = _INITIAL_FLUSH_DELAY
     # Supplied by tests; in production the collector builds its own HTTP reporter.
     reporter: EventReporter | None = field(default=None, compare=False)
+
+
+class TelemetryProtocol(Protocol):
+    def record_evaluation(
+        self,
+        *,
+        key: str,
+        default: ConfigValue,
+        value: ConfigValue,
+        used_default: bool,
+        reason: EvaluationReason,
+        context: Context | None = None,
+        config_type: ConfigType | None = None,
+        value_id: str | None = None,
+    ) -> None: ...
+
+    def close(self) -> None: ...
 
 
 class TelemetryCollector:

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.metadata
+from collections.abc import Callable
 from enum import Enum
 
+from ._telemetry import TelemetryCollectorOptions, TelemetryProtocol
+from ._transport import Transport, TransportOptions
 from ._version import SdkIdentity
 from .client import _ConfigDirectorClient
 from .errors import ConfigDirectorTypeError
@@ -48,6 +51,8 @@ def create_wrapped_client(
     log_level: int | str | None = None,
     telemetry: TelemetryOptions | None = None,
     hooks: ClientHooks | None = None,
+    transport_factory: Callable[[TransportOptions], Transport] | None = None,
+    telemetry_factory: Callable[[TelemetryCollectorOptions], TelemetryProtocol] | None = None,
 ) -> ConfigDirectorClient:
     if not isinstance(wrapper, Wrapper):
         raise ConfigDirectorTypeError(
@@ -64,4 +69,6 @@ def create_wrapped_client(
         telemetry=telemetry,
         hooks=hooks,
         sdk_identity=wrapper.identity(),
+        transport_factory=transport_factory,
+        telemetry_factory=telemetry_factory,
     )

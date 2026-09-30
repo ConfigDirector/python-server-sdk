@@ -17,6 +17,7 @@ from configdirector._evaluation import (
 )
 from configdirector._telemetry import TelemetryCollectorOptions
 from configdirector._transport import TransportOptions
+from configdirector.client import _ConfigDirectorClient
 from configdirector.types import (
     ConfigDirectorLogger,
     ConfigType,
@@ -77,8 +78,7 @@ class RecordingLogger:
 class FakeTransport:
     """Stands in for a real transport, delivering bundles on demand instead of over a socket."""
 
-    def __init__(self, mode: str, options: TransportOptions, recorder: TransportRecorder) -> None:
-        self.mode = mode
+    def __init__(self, options: TransportOptions, recorder: TransportRecorder) -> None:
         self.options = options
         self.connect_timeouts: list[float] = []
         self.closed = False
@@ -110,8 +110,8 @@ class TransportRecorder:
         self.initial_bundle: ConfigBundle | None = bundle()
         self.connect_error: BaseException | None = None
 
-    def __call__(self, mode: str, options: TransportOptions) -> FakeTransport:
-        transport = FakeTransport(mode, options, self)
+    def __call__(self, options: TransportOptions) -> FakeTransport:
+        transport = FakeTransport(options, self)
         self.created.append(transport)
         return transport
 
@@ -188,6 +188,18 @@ class TelemetryRecorder:
     @property
     def evaluations(self) -> list[RecordedEvaluation]:
         return self.last.evaluations
+
+
+ClientBuilder = Callable[..., _ConfigDirectorClient]
+
+
+def client_builder(transports: TransportRecorder, telemetry: TelemetryRecorder) -> ClientBuilder:
+    def build(server_sdk_key: str, **options: Any) -> _ConfigDirectorClient:
+        return _ConfigDirectorClient(
+            server_sdk_key, transport_factory=transports, telemetry_factory=telemetry, **options
+        )
+
+    return build
 
 
 def bundle(

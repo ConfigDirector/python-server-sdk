@@ -7,6 +7,7 @@ from .collector import (
     MIN_EVENT_QUEUE_LIMIT,
     TelemetryCollector,
     TelemetryCollectorOptions,
+    TelemetryProtocol,
 )
 from .compact_json import to_compact_json
 from .events import (
@@ -39,6 +40,7 @@ __all__ = [
     "ReporterResponse",
     "TelemetryCollector",
     "TelemetryCollectorOptions",
+    "TelemetryProtocol",
     "TelemetryValue",
     "aggregate",
     "generate_value_id",
