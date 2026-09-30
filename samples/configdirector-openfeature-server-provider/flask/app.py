@@ -16,7 +16,7 @@ from __future__ import annotations
 from flask import Flask, Response, jsonify, request
 from openfeature.evaluation_context import EvaluationContext
 
-from openfeature_client import client
+from openfeature_client import get_client
 
 CONTEXT_FIELDS = frozenset({"id", "name", "anonymous"})
 
@@ -24,6 +24,7 @@ app = Flask(__name__)
 
 
 def resolve_configs(context: EvaluationContext) -> dict[str, object]:
+    client = get_client()
     return {
         "temporary-feature-flag": client.get_boolean_value("temporary-feature-flag", True, context),
         "permanent-kill-switch": client.get_boolean_value("permanent-kill-switch", False, context),
@@ -50,7 +51,7 @@ def configs() -> Response:
 
 @app.get("/configs/<key>")
 def config_details(key: str) -> Response:
-    details = client.get_boolean_details(key, False, context_from_request())
+    details = get_client().get_boolean_details(key, False, context_from_request())
     return jsonify(
         value=details.value,
         variant=details.variant,

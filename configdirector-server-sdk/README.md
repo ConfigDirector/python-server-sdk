@@ -98,15 +98,20 @@ application around a lazy getter instead, and replace that in tests:
 
 ```python
 _client: ConfigDirectorClient | None = None
+_client_lock = threading.Lock()
 
 
 def get_client() -> ConfigDirectorClient:
     global _client
-    if _client is None:
-        _client = create_client(os.environ["CONFIGDIRECTOR_SERVER_SDK_KEY"])
-        _client.initialize()
-    return _client
+    with _client_lock:
+        if _client is None:
+            _client = create_client(os.environ["CONFIGDIRECTOR_SERVER_SDK_KEY"])
+            _client.initialize()
+        return _client
 ```
+
+The lock matters on a threaded server: without it, two first requests arriving together each
+build and initialize a client.
 
 ```python
 def test_new_checkout(monkeypatch: pytest.MonkeyPatch) -> None:

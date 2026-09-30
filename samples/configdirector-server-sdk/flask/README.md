@@ -35,30 +35,37 @@ matching `Context` fields, and anything else becomes a trait:
 /configs?id=user-123&name=Ada&plan=pro&region=eu
 ```
 
-Run the smoke tests with `uv run pytest`.
+Run the tests with `uv run pytest`.
 
 ## The client is a singleton
 
 This is the single most important thing the sample shows, so it lives in its own module:
-[`configdirector_client.py`](configdirector_client.py). Create one client when the server
-starts, share it for the whole lifetime of the process, and close it on shutdown.
+[`configdirector_client.py`](configdirector_client.py). Create one client, share it for the
+whole lifetime of the process, and close it on shutdown.
 
 ```python
-# configdirector_client.py — runs exactly once per process
-client = create_client(os.environ["CONFIGDIRECTOR_SERVER_KEY"], ...)
-client.initialize()
-atexit.register(client.close)
+# configdirector_client.py — the first call creates and initializes the client
+def get_client() -> ConfigDirectorClient:
+    global _client
+    with _client_lock:
+        if _client is None:
+            _client = _create_and_initialize_client()
+        return _client
 ```
 
 ```python
 # app.py — every request handler shares that one instance
-from configdirector_client import client
+from configdirector_client import get_client
 ```
 
-Importing the module is what creates it: Python caches modules in `sys.modules`, so the code
-runs once no matter how many places import `client`. Never call `create_client()` inside a
-request handler — each client opens its own connection, blocks on `initialize()`, starts
+The getter is created on first use and cached for the rest of the process; the lock makes sure
+two first requests arriving together still end up with one client. Never call `create_client()`
+inside a request handler — each client opens its own connection, blocks on `initialize()`, starts
 out not-ready (so it serves defaults), and drops its batched telemetry when it is discarded.
+
+A getter rather than a module-level `client` is also what makes the app testable: a test
+replaces `get_client` with a client of its own, whereas a client created at import runs before
+any test can intervene. See [Testing](#testing) below.
 
 Concurrency is not a reason to make more of them: the client is thread-safe, so every worker
 thread shares this one safely. Process-based servers (Gunicorn workers, or `flask run --debug`'s
@@ -107,6 +114,29 @@ telemetry. A production deployment would also hook its server's worker-exit sign
 
 The SDK also supports watching configs for changes and subscribing to client events; see the
 [SDK README](../../../configdirector-server-sdk/README.md) for `watch()` and `on()`.
+
+## Testing
+
+[`test_app.py`](test_app.py) tests the app the way an application using the SDK tests itself:
+with a **test client** from `configdirector.testing`, the SDK's real client over an in-memory
+connection the test controls. No network, no SDK key, no thread.
+
+```python
+from configdirector.testing import create_test_client
+
+with create_test_client({"integer-config": 42}) as test_client:
+    test_client.client.initialize()
+    monkeypatch.setattr(app_module, "get_client", lambda: test_client.client)
+
+    assert app.test_client().get("/configs").get_json()["integer-config"] == 42
+
+    test_client.set_value("integer-config", 7)
+    assert app.test_client().get("/configs").get_json()["integer-config"] == 7
+```
+
+`app.py` binds `get_client` with `from configdirector_client import get_client`, so the test
+patches the name in `app`, the module that calls it. `fail_initialization()` is how the tests
+cover the unreachable path: the client stays unready and the app serves the defaults it chose.
 
 ## Running without a server SDK key
 

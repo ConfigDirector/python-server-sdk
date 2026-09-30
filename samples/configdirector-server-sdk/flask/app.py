@@ -15,10 +15,10 @@ from __future__ import annotations
 from configdirector import Context
 from flask import Flask, Response, jsonify, request
 
-# The single, process-wide client. It was created and initialized when this import ran, and the
-# same instance serves every request below — see configdirector_client.py for why, and for the
-# logging setup that has to happen before it.
-from configdirector_client import client
+# The single, process-wide client: created and initialized on the first call, and the same
+# instance every call after that — see configdirector_client.py for why, and for the logging
+# setup that has to happen before it.
+from configdirector_client import get_client
 
 # Query parameters that describe the user rather than one of their traits.
 CONTEXT_FIELDS = frozenset({"id", "name", "anonymous"})
@@ -37,6 +37,7 @@ def resolve_configs(context: Context) -> dict[str, object]:
     unreachable, so it should always be the safe choice. Its type also decides how the config
     value is parsed.
     """
+    client = get_client()
     return {
         "temporary-feature-flag": client.get_value("temporary-feature-flag", True, context),
         "permanent-kill-switch": client.get_value("permanent-kill-switch", False, context),

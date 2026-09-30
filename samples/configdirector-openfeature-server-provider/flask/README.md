@@ -54,30 +54,35 @@ curl 'http://localhost:3600/configs/temporary-feature-flag?id=user-123'
 }
 ```
 
-Run the smoke tests with `uv run pytest`.
+Run the tests with `uv run pytest`.
 
 ## The provider is registered once
 
-[`openfeature_client.py`](openfeature_client.py) creates one provider when the server starts,
-hands it to OpenFeature, and shuts OpenFeature down on exit:
+[`openfeature_client.py`](openfeature_client.py) creates one provider, hands it to OpenFeature,
+and shuts OpenFeature down on exit. `get_client()` does that on its first call and returns the
+OpenFeature client every call after:
 
 ```python
-# openfeature_client.py — runs exactly once per process
-api.set_provider_and_wait(ConfigDirectorProvider(os.environ["CONFIGDIRECTOR_SERVER_KEY"], ...))
-atexit.register(api.shutdown)
-
-client = api.get_client()
+# openfeature_client.py — the first call registers the provider
+def get_client() -> OpenFeatureClient:
+    global _provider_registered
+    with _provider_lock:
+        if not _provider_registered:
+            _register_provider()
+            _provider_registered = True
+        return api.get_client()
 ```
 
 ```python
 # app.py — every request handler shares that one client
-from openfeature_client import client
+from openfeature_client import get_client
 ```
 
-Importing the module is what registers it: Python caches modules in `sys.modules`, so the code
-runs once no matter how many places import `client`. Never create a provider inside a request
-handler — each one opens its own connection to ConfigDirector, blocks while it initializes, and
-starts out with no config state.
+Never create a provider inside a request handler — each one opens its own connection to
+ConfigDirector, blocks while it initializes, and starts out with no config state. A getter rather
+than registering the provider at import is also what makes the app testable: a test swaps the
+provider for OpenFeature's own in-memory one, whereas a provider registered at import runs before
+any test can intervene. See [Testing](#testing) below.
 
 Process-based servers (Gunicorn workers, or `flask run --debug`'s reloader) get one provider per
 process, which is correct: a connection cannot be shared across processes.
@@ -97,6 +102,25 @@ session.
 
 **Shutdown is clean.** `api.shutdown` closes the provider, dropping its connection and flushing
 pending telemetry.
+
+## Testing
+
+Code that reads flags through OpenFeature is tested by swapping the provider, so nothing from
+ConfigDirector is involved. [`test_app.py`](test_app.py) registers the OpenFeature SDK's
+`InMemoryProvider` with the flags each test needs and points `get_client` at the OpenFeature API:
+
+```python
+from openfeature import api
+from openfeature.provider.in_memory_provider import InMemoryFlag, InMemoryProvider
+
+api.set_provider_and_wait(InMemoryProvider({"integer-config": InMemoryFlag("forty-two", {"forty-two": 42})}))
+monkeypatch.setattr(app_module, "get_client", api.get_client)
+
+assert app.test_client().get("/configs").get_json()["integer-config"] == 42
+```
+
+The OpenFeature API is one global, so each test shuts it down afterwards with `api.shutdown()`,
+which lets the next test register its own provider.
 
 ## Running without a server SDK key
 

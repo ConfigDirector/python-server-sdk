@@ -59,6 +59,22 @@ new_checkout = client.get_boolean_value("new-checkout", False, context)
 
 If the first config state does not arrive within the configured timeout, initialization still completes and evaluations return their defaults. The provider keeps connecting, and emits `PROVIDER_READY` once config state arrives. It emits `PROVIDER_CONFIGURATION_CHANGED` whenever configs are updated, with the keys the update carried followed by the keys a full update removed.
 
+## Test your code
+
+Tests of code that reads flags through OpenFeature swap the provider for the in-memory one the OpenFeature Python SDK ships, `InMemoryProvider`, so the test controls the values and nothing from ConfigDirector is involved:
+
+```python
+from openfeature import api
+from openfeature.provider.in_memory_provider import InMemoryFlag, InMemoryProvider
+
+api.set_provider_and_wait(InMemoryProvider({"new-checkout": InMemoryFlag("on", {"on": True, "off": False})}))
+client = api.get_client()
+
+assert client.get_boolean_value("new-checkout", False) is True
+```
+
+The provider copies its flags and has no method to change them, so a mid-test change sets a new provider. Shut OpenFeature down after each test with `api.shutdown()`. Full details are in the [testing section of the official documentation](https://docs.configdirector.com/sdks/openfeature/python#test-your-code).
+
 ## Documentation
 
 Refer to the [official documentation for the OpenFeature Python provider](https://docs.configdirector.com/sdks/openfeature/python).

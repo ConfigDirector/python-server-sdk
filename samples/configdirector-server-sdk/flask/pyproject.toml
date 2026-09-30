@@ -16,6 +16,9 @@ dev = ["mypy>=1.14", "pytest>=8.3"]
 # A runnable app, not a distributable package: install the dependencies, not this project.
 package = false
 
+[tool.uv.sources]
+configdirector-server-sdk = { path = "../../../configdirector-server-sdk", editable = true }
+
 [tool.ruff]
 # Inherit the SDK's style, but resolve first-party imports against this directory so that
 # `configdirector` sorts as the third-party dependency it is here.
