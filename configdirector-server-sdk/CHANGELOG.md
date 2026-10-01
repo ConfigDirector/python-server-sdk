@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-01
+
 ### Added
 
 - `configdirector.testing`, with `create_test_client` returning a `TestClient` whose `client` is a
