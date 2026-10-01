@@ -6,11 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-01
+
 ### Changed
 
 - `PROVIDER_CONFIGURATION_CHANGED` now lists the flags a full update removed in `flags_changed`,
   after the flags the update carried. Before, a removed flag was not reported as changed. Requires
-  the server SDK release that adds `ConfigsUpdatedEvent.removed_keys`.
+  `configdirector-server-sdk` 1.5.0 or later, which adds `ConfigsUpdatedEvent.removed_keys`.
 
 ## [1.2.1] - 2026-09-26
 
