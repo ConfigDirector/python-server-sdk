@@ -5,10 +5,13 @@ from typing import Any
 
 import pytest
 
+from configdirector import Context
 from configdirector._bundle import NotAConfigBundleError, parse_bundle
 from configdirector._evaluation import (
     ConditionalRule,
+    ConfigEvaluator,
     EnumTypeConstraints,
+    EvaluationContext,
     NumericTypeConstraints,
     PercentageRule,
 )
@@ -366,3 +369,87 @@ class TestValueIds:
         assert isinstance(rule, ConditionalRule)
         assert rule.value_id is None
         assert config.target.default_value_id is None
+
+
+class TestPayloadFieldsTheSdkDoesNotRead:
+    def set_with_condition_kinds_and_payload_version(self, kind: str) -> str:
+        return wire_bundle(
+            wire_config(
+                target={
+                    "defaultValue": "hello",
+                    "defaultValueId": "value-id-1",
+                    "rules": [
+                        {
+                            "id": "rule-1",
+                            "type": "conditional",
+                            "order": 0,
+                            "target": "value",
+                            "value": "bonjour",
+                            "valueId": "value-id-2",
+                            "conditions": [
+                                {
+                                    "id": "condition-1",
+                                    "kind": "attribute",
+                                    "attribute": "identifier",
+                                    "trait": None,
+                                    "operator": "=",
+                                    "targetType": "text",
+                                    "targetValues": ["10"],
+                                },
+                                {
+                                    "id": "condition-2",
+                                    "kind": "attribute",
+                                    "attribute": "traits",
+                                    "trait": "/plan",
+                                    "operator": "is one of",
+                                    "targetType": "text",
+                                    "targetValues": ["pro", "enterprise"],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ),
+            kind=kind,
+            payloadVersion=1,
+        )
+
+    def test_a_full_set_with_condition_kinds_and_a_payload_version_serves_as_before(
+        self, logger: RecordingLogger
+    ) -> None:
+        bundle = parse_bundle(self.set_with_condition_kinds_and_payload_version("full"), logger)
+        evaluator = ConfigEvaluator(logger)
+
+        assert bundle.kind == "full"
+        assert bundle.unreadable_keys == []
+        config = bundle.configs["greeting"]
+        matched = evaluator.evaluate(
+            config, EvaluationContext(context=Context(id="10", traits={"plan": "pro"}))
+        )
+        assert matched.value == "bonjour"
+        assert matched.value_id == "value-id-2"
+        unmatched = evaluator.evaluate(
+            config, EvaluationContext(context=Context(id="10", traits={"plan": "free"}))
+        )
+        assert unmatched.value == "hello"
+        assert unmatched.value_id == "value-id-1"
+
+    def test_a_delta_with_condition_kinds_and_a_payload_version_serves_as_before(
+        self, logger: RecordingLogger
+    ) -> None:
+        bundle = parse_bundle(self.set_with_condition_kinds_and_payload_version("delta"), logger)
+        evaluator = ConfigEvaluator(logger)
+
+        assert bundle.kind == "delta"
+        assert bundle.unreadable_keys == []
+        config = bundle.configs["greeting"]
+        matched = evaluator.evaluate(
+            config, EvaluationContext(context=Context(id="10", traits={"plan": "pro"}))
+        )
+        assert matched.value == "bonjour"
+        assert matched.value_id == "value-id-2"
+        unmatched = evaluator.evaluate(
+            config, EvaluationContext(context=Context(id="10", traits={"plan": "free"}))
+        )
+        assert unmatched.value == "hello"
+        assert unmatched.value_id == "value-id-1"
