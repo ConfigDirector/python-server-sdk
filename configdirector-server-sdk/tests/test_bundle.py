@@ -8,12 +8,15 @@ import pytest
 from configdirector import Context
 from configdirector._bundle import NotAConfigBundleError, parse_bundle
 from configdirector._evaluation import (
+    AttributeCondition,
     ConditionalRule,
     ConfigEvaluator,
     EnumTypeConstraints,
     EvaluationContext,
     NumericTypeConstraints,
     PercentageRule,
+    Segment,
+    SegmentCondition,
 )
 from tests.helpers import RecordingLogger
 
@@ -184,8 +187,10 @@ class TestRuleParsing:
         assert isinstance(rules[0], ConditionalRule)
         assert rules[0].order == 1
         assert rules[0].value == "bonjour"
-        assert rules[0].conditions[0].attribute == "name"
-        assert rules[0].conditions[0].target_values == ["Ada"]
+        condition = rules[0].conditions[0]
+        assert isinstance(condition, AttributeCondition)
+        assert condition.attribute == "name"
+        assert condition.target_values == ["Ada"]
 
     def test_reads_a_percentage_rule(self, logger: RecordingLogger) -> None:
         payload = wire_bundle(
@@ -275,7 +280,9 @@ class TestRuleParsing:
         rule = parse_bundle(payload, logger).configs["greeting"].target.rules[0]
 
         assert isinstance(rule, ConditionalRule)
-        assert rule.conditions[0].target_values == [expected]
+        condition = rule.conditions[0]
+        assert isinstance(condition, AttributeCondition)
+        assert condition.target_values == [expected]
 
     def test_a_structured_rule_value_is_carried_as_json_text(self, logger: RecordingLogger) -> None:
         payload = wire_bundle(
@@ -453,3 +460,138 @@ class TestPayloadFieldsTheSdkDoesNotRead:
         )
         assert unmatched.value == "hello"
         assert unmatched.value_id == "value-id-1"
+
+
+class TestSegments:
+    def segment_group(self, domain: str, kind: str | None = "attribute") -> dict[str, Any]:
+        condition: dict[str, Any] = {
+            "id": "g0c0",
+            "attribute": "traits",
+            "trait": "/email",
+            "operator": "ends with any of",
+            "targetType": "text",
+            "targetValues": [domain],
+        }
+        if kind is not None:
+            condition["kind"] = kind
+        return condition
+
+    def rule_for_members_of(self, segment_id: str) -> dict[str, Any]:
+        return {
+            "id": "rule-1",
+            "type": "conditional",
+            "order": 0,
+            "target": "value",
+            "value": "members",
+            "valueId": "value-id-2",
+            "conditions": [
+                {"id": "condition-1", "kind": "segment", "operator": "in", "segmentId": segment_id}
+            ],
+        }
+
+    def test_reads_the_segments_section_into_groups_of_attribute_conditions(
+        self, logger: RecordingLogger
+    ) -> None:
+        payload = wire_bundle(
+            wire_config(),
+            segments={
+                "segment-1": {
+                    "groups": [[self.segment_group("@acme.com")], [self.segment_group("@beta.com")]]
+                }
+            },
+        )
+
+        bundle = parse_bundle(payload, logger)
+
+        assert bundle.segments == {
+            "segment-1": Segment(
+                groups=[
+                    [
+                        AttributeCondition(
+                            id="g0c0",
+                            attribute="traits",
+                            trait="/email",
+                            operator="ends with any of",
+                            target_type="text",
+                            target_values=["@acme.com"],
+                        )
+                    ],
+                    [
+                        AttributeCondition(
+                            id="g0c0",
+                            attribute="traits",
+                            trait="/email",
+                            operator="ends with any of",
+                            target_type="text",
+                            target_values=["@beta.com"],
+                        )
+                    ],
+                ]
+            )
+        }
+
+    def test_a_payload_without_a_segments_section_carries_no_segments(self, logger: RecordingLogger) -> None:
+        bundle = parse_bundle(wire_bundle(wire_config()), logger)
+
+        assert bundle.segments == {}
+
+    def test_a_group_condition_without_a_kind_is_an_attribute_condition(
+        self, logger: RecordingLogger
+    ) -> None:
+        payload = wire_bundle(
+            wire_config(), segments={"segment-1": {"groups": [[self.segment_group("@acme.com", kind=None)]]}}
+        )
+
+        bundle = parse_bundle(payload, logger)
+
+        assert bundle.segments["segment-1"].groups[0][0].attribute == "traits"
+
+    def test_reads_a_segment_condition_in_a_rule(self, logger: RecordingLogger) -> None:
+        payload = wire_bundle(
+            wire_config(target={"defaultValue": "hello", "rules": [self.rule_for_members_of("segment-1")]})
+        )
+
+        bundle = parse_bundle(payload, logger)
+
+        rule = bundle.configs["greeting"].target.rules[0]
+        assert isinstance(rule, ConditionalRule)
+        assert rule.conditions == [SegmentCondition(id="condition-1", operator="in", segment_id="segment-1")]
+
+    def test_an_unreadable_segment_is_skipped_and_logged_and_the_rest_kept(
+        self, logger: RecordingLogger
+    ) -> None:
+        payload = wire_bundle(
+            wire_config(),
+            segments={
+                "broken": {"groups": [[{"id": "g0c0", "kind": "attribute", "operator": "equals"}]]},
+                "segment-1": {"groups": [[self.segment_group("@acme.com")]]},
+            },
+        )
+
+        bundle = parse_bundle(payload, logger)
+
+        assert list(bundle.segments) == ["segment-1"]
+        assert bundle.unreadable_keys == []
+        assert any("broken" in message for message in logger.messages("warning"))
+
+    def test_a_segment_condition_inside_a_group_makes_the_segment_unreadable(
+        self, logger: RecordingLogger
+    ) -> None:
+        nested = {"id": "g0c0", "kind": "segment", "operator": "in", "segmentId": "other"}
+        payload = wire_bundle(wire_config(), segments={"segment-1": {"groups": [[nested]]}})
+
+        bundle = parse_bundle(payload, logger)
+
+        assert bundle.segments == {}
+
+    def test_a_condition_of_an_unknown_kind_makes_the_config_unreadable(
+        self, logger: RecordingLogger
+    ) -> None:
+        rule = self.rule_for_members_of("segment-1")
+        rule["conditions"][0]["kind"] = "made-up"
+        payload = wire_bundle(wire_config(target={"defaultValue": "hello", "rules": [rule]}))
+
+        bundle = parse_bundle(payload, logger)
+
+        assert bundle.configs == {}
+        assert bundle.unreadable_keys == ["greeting"]

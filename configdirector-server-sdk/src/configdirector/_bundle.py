@@ -6,6 +6,7 @@ from typing import Any, Literal, cast
 
 from ._evaluation._json_value import to_json_string
 from ._evaluation.types import (
+    AttributeCondition,
     Condition,
     ConditionalRule,
     Config,
@@ -15,6 +16,9 @@ from ._evaluation.types import (
     PercentageRule,
     Rule,
     RuleValue,
+    Segment,
+    SegmentCondition,
+    Segments,
     TargetingRules,
     Variation,
 )
@@ -32,6 +36,7 @@ class NotAConfigBundleError(ValueError):
 @dataclass(frozen=True, slots=True)
 class ConfigBundle:
     configs: dict[str, Config] = field(default_factory=dict)
+    segments: Segments = field(default_factory=dict)
     kind: BundleKind = "full"
     unreadable_keys: list[str] = field(default_factory=list)
     environment_id: str | None = None
@@ -55,6 +60,7 @@ def parse_bundle(payload: str, logger: ConfigDirectorLogger) -> ConfigBundle:
     configs, unreadable_keys = _parse_configs(raw_configs, logger)
     return ConfigBundle(
         configs=configs,
+        segments=_parse_segments(document.get("segments"), logger),
         kind="delta" if document.get("kind") == "delta" else "full",
         unreadable_keys=unreadable_keys,
         environment_id=_optional_string(document.get("environmentId")),
@@ -120,8 +126,45 @@ def _parse_rule(raw: Any) -> Rule:
     )
 
 
+def _parse_segments(raw: Any, logger: ConfigDirectorLogger) -> Segments:
+    if not isinstance(raw, dict):
+        return {}
+    segments: Segments = {}
+    for segment_id, definition in raw.items():
+        try:
+            segments[str(segment_id)] = _parse_segment(definition)
+        except (AttributeError, KeyError, TypeError, ValueError) as error:
+            logger.warning("Skipping the segment %r, its definition could not be read: %r", segment_id, error)
+    return segments
+
+
+def _parse_segment(raw: Any) -> Segment:
+    return Segment(
+        groups=[[_parse_attribute_condition(condition) for condition in group] for group in raw["groups"]]
+    )
+
+
+def _condition_kind(raw: Any) -> str:
+    return str(raw.get("kind", "attribute"))
+
+
 def _parse_condition(raw: Any) -> Condition:
-    return Condition(
+    kind = _condition_kind(raw)
+    if kind == "attribute":
+        return _parse_attribute_condition(raw)
+    if kind == "segment":
+        return SegmentCondition(
+            id=str(raw["id"]),
+            operator=str(raw["operator"]),
+            segment_id=str(raw["segmentId"]),
+        )
+    raise ValueError(f"Unknown condition kind {kind!r}")
+
+
+def _parse_attribute_condition(raw: Any) -> AttributeCondition:
+    if _condition_kind(raw) != "attribute":
+        raise ValueError("A condition group holds attribute conditions only")
+    return AttributeCondition(
         id=str(raw["id"]),
         attribute=str(raw["attribute"]),
         operator=str(raw["operator"]),

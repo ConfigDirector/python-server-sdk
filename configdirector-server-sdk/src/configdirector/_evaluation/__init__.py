@@ -7,6 +7,7 @@ from .percent_hashing import assign_percentage
 from .semver_comparison import compare_semver
 from .text_comparison import compare_text
 from .types import (
+    AttributeCondition,
     Condition,
     ConditionalRule,
     Config,
@@ -16,6 +17,9 @@ from .types import (
     Percentage,
     PercentageRule,
     Rule,
+    Segment,
+    SegmentCondition,
+    Segments,
     Target,
     TargetingRules,
     TargetType,
@@ -23,6 +27,7 @@ from .types import (
 )
 
 __all__ = [
+    "AttributeCondition",
     "Condition",
     "ConditionalRule",
     "Config",
@@ -33,6 +38,9 @@ __all__ = [
     "Percentage",
     "PercentageRule",
     "Rule",
+    "Segment",
+    "SegmentCondition",
+    "Segments",
     "Target",
     "TargetType",
     "TargetingRules",

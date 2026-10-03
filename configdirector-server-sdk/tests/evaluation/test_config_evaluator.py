@@ -6,7 +6,7 @@ from typing import Any
 
 from configdirector import Context, Metadata
 from configdirector._evaluation import (
-    Condition,
+    AttributeCondition,
     ConditionalRule,
     Config,
     ConfigEvaluator,
@@ -31,8 +31,8 @@ def ctx(**kwargs: Any) -> EvaluationContext:
     return EvaluationContext(context=Context(**kwargs))
 
 
-def identifier_is(value: str) -> Condition:
-    return Condition(
+def identifier_is(value: str) -> AttributeCondition:
+    return AttributeCondition(
         id=uid(),
         attribute="identifier",
         operator="=",
@@ -42,8 +42,8 @@ def identifier_is(value: str) -> Condition:
     )
 
 
-def plan_is(value: str) -> Condition:
-    return Condition(
+def plan_is(value: str) -> AttributeCondition:
+    return AttributeCondition(
         id=uid(),
         attribute="traits",
         operator="=",
@@ -53,7 +53,7 @@ def plan_is(value: str) -> Condition:
     )
 
 
-def config_requiring(*conditions: Condition) -> Config:
+def config_requiring(*conditions: AttributeCondition) -> Config:
     return Config(
         id=CONFIG_ID,
         key="config-with-a-two-condition-rule",
@@ -529,7 +529,7 @@ class TestUnknownRuleType:
 
 
 class TestResilienceToMalformedRuntimeConditionData:
-    def _config_with(self, condition: Condition) -> Config:
+    def _config_with(self, condition: AttributeCondition) -> Config:
         return Config(
             id=CONFIG_ID,
             key="cfg",
@@ -552,7 +552,7 @@ class TestResilienceToMalformedRuntimeConditionData:
 
     def test_text_condition_with_no_target_values(self) -> None:
         config = self._config_with(
-            Condition(
+            AttributeCondition(
                 id=uid(),
                 attribute="identifier",
                 operator="=",
@@ -565,7 +565,7 @@ class TestResilienceToMalformedRuntimeConditionData:
 
     def test_numeric_condition_with_no_target_values(self) -> None:
         config = self._config_with(
-            Condition(
+            AttributeCondition(
                 id=uid(),
                 attribute="identifier",
                 operator="=",
@@ -578,7 +578,7 @@ class TestResilienceToMalformedRuntimeConditionData:
 
     def test_semver_condition_with_no_target_values(self) -> None:
         config = self._config_with(
-            Condition(
+            AttributeCondition(
                 id=uid(),
                 attribute="appVersion",
                 operator=">",
@@ -592,7 +592,7 @@ class TestResilienceToMalformedRuntimeConditionData:
 
     def test_datetime_condition_with_no_target_values(self) -> None:
         config = self._config_with(
-            Condition(
+            AttributeCondition(
                 id=uid(),
                 attribute="traits",
                 trait="/createdAt",
@@ -607,7 +607,7 @@ class TestResilienceToMalformedRuntimeConditionData:
 
     def test_array_condition_with_no_target_values(self) -> None:
         config = self._config_with(
-            Condition(
+            AttributeCondition(
                 id=uid(),
                 attribute="traits",
                 trait="/roles",
@@ -638,7 +638,7 @@ class TestNumericComparisonEdgeCases:
                         value="rule-value",
                         percentages=[],
                         conditions=[
-                            Condition(
+                            AttributeCondition(
                                 id=uid(),
                                 attribute="traits",
                                 trait="/score",
@@ -670,7 +670,7 @@ class TestNumericComparisonEdgeCases:
                         value="rule-value",
                         percentages=[],
                         conditions=[
-                            Condition(
+                            AttributeCondition(
                                 id=uid(),
                                 attribute="traits",
                                 trait="/score",

@@ -19,6 +19,7 @@ from configdirector import (
     Subscription,
     TelemetryOptions,
 )
+from configdirector._evaluation import AttributeCondition, ConditionalRule, Segment, SegmentCondition
 from configdirector._telemetry.value_id import VALUE_ID_LENGTH, generate_value_id
 from configdirector._transport import PollingTransport, StreamingTransport
 from configdirector._version import SERVER_SDK_IDENTITY, __version__
@@ -1094,3 +1095,128 @@ class TestValueIds:
 
         assert client.get_value("greeting", "fallback") == "hello"
         assert events[-1].evaluation.value_id == generate_value_id("hello")
+
+
+class TestSegments:
+    ACME = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    BETA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    MEMBER = Context(id="10", traits={"email": "ann@acme.com"})
+    OUTSIDER = Context(id="20", traits={"email": "bob@other.com"})
+
+    @staticmethod
+    def members_of(domain: str) -> Segment:
+        return Segment(
+            groups=[
+                [
+                    AttributeCondition(
+                        id="g0c0",
+                        attribute="traits",
+                        trait="/email",
+                        operator="ends with any of",
+                        target_type="text",
+                        target_values=[domain],
+                    )
+                ]
+            ]
+        )
+
+    @classmethod
+    def rule_serving_members_of(cls, segment_id: str, value: str) -> ConditionalRule:
+        return ConditionalRule(
+            id="r1",
+            order=0,
+            target="value",
+            value=value,
+            conditions=[SegmentCondition(id="c1", operator="in", segment_id=segment_id)],
+        )
+
+    def test_evaluates_a_segment_condition_against_the_segments_a_full_bundle_carries(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "bonjour")]),
+            segments={self.ACME: self.members_of("@acme.com")},
+        )
+        client.initialize()
+
+        assert client.get_value("greeting", "in-code-default", self.MEMBER) == "bonjour"
+        assert client.get_value("greeting", "in-code-default", self.OUTSIDER) == "hello"
+        assert client.get_all_configs(self.MEMBER)["greeting"].value == "bonjour"
+
+    def test_keeps_the_segments_it_holds_across_a_delta_that_carries_none(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "bonjour")]),
+            segments={self.ACME: self.members_of("@acme.com")},
+        )
+        client.initialize()
+
+        transports.last.deliver(
+            bundle(
+                config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "salut")]),
+                kind="delta",
+            )
+        )
+
+        assert client.get_value("greeting", "in-code-default", self.MEMBER) == "salut"
+
+    def test_adds_the_segments_a_delta_carries_to_the_ones_it_holds(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "bonjour")]),
+            segments={self.ACME: self.members_of("@acme.com")},
+        )
+        client.initialize()
+
+        transports.last.deliver(
+            bundle(
+                config("farewell", "bye", rules=[self.rule_serving_members_of(self.BETA, "ciao")]),
+                kind="delta",
+                segments={self.BETA: self.members_of("@beta.com")},
+            )
+        )
+
+        assert (
+            client.get_value(
+                "farewell", "in-code-default", Context(id="30", traits={"email": "cat@beta.com"})
+            )
+            == "ciao"
+        )
+        assert client.get_value("greeting", "in-code-default", self.MEMBER) == "bonjour"
+
+    def test_drops_the_segments_a_full_bundle_no_longer_carries(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "bonjour")]),
+            segments={self.ACME: self.members_of("@acme.com")},
+        )
+        client.initialize()
+
+        transports.last.deliver(
+            bundle(config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "salut")]))
+        )
+
+        assert client.get_value("greeting", "in-code-default", self.MEMBER) == "hello"
+
+    def test_watchers_evaluate_with_the_segments_held(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "bonjour")]),
+            segments={self.ACME: self.members_of("@acme.com")},
+        )
+        received: list[str] = []
+        client.watch("greeting", "in-code-default", received.append, self.MEMBER)
+        client.initialize()
+
+        transports.last.deliver(
+            bundle(
+                config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "salut")]),
+                kind="delta",
+            )
+        )
+
+        assert received == ["bonjour", "salut"]

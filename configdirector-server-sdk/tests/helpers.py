@@ -7,12 +7,13 @@ from typing import Any
 
 from configdirector._bundle import BundleKind, ConfigBundle
 from configdirector._evaluation import (
-    Condition,
+    AttributeCondition,
     ConditionalRule,
     Config,
     Percentage,
     PercentageRule,
     Rule,
+    Segments,
     TargetingRules,
 )
 from configdirector._telemetry import TelemetryCollectorOptions
@@ -207,9 +208,11 @@ def bundle(
     kind: BundleKind = "full",
     timestamp: str | None = None,
     unreadable_keys: Sequence[str] = (),
+    segments: Segments | None = None,
 ) -> ConfigBundle:
     return ConfigBundle(
         configs={config.key: config for config in configs},
+        segments={} if segments is None else dict(segments),
         kind=kind,
         unreadable_keys=list(unreadable_keys),
         environment_id="10000000-0000-0000-0000-000000000000",
@@ -239,7 +242,7 @@ def config(
 
 def conditional_rule(
     value: str | int | float | bool,
-    *conditions: Condition,
+    *conditions: AttributeCondition,
     order: int = 0,
     id: str = "rule-1",
     value_id: str | None = None,
@@ -258,8 +261,8 @@ def condition(
     target_type: str = "text",
     trait: str | None = None,
     id: str = "condition-1",
-) -> Condition:
-    return Condition(
+) -> AttributeCondition:
+    return AttributeCondition(
         id=id,
         attribute=attribute,
         operator=operator,

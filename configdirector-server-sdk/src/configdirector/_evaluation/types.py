@@ -11,6 +11,7 @@ __all__ = [
     "NUMBER_OPERATORS",
     "SEMVER_OPERATORS",
     "TEXT_OPERATORS",
+    "AttributeCondition",
     "Condition",
     "ConditionalRule",
     "Config",
@@ -21,6 +22,9 @@ __all__ = [
     "PercentageRule",
     "Rule",
     "RuleValue",
+    "Segment",
+    "SegmentCondition",
+    "Segments",
     "Target",
     "TargetType",
     "TargetingRules",
@@ -50,13 +54,31 @@ RuleValue = str | int | float | bool | None
 
 
 @dataclass(frozen=True, slots=True)
-class Condition:
+class AttributeCondition:
     id: str
     attribute: str
     operator: str
     target_type: str
     target_values: list[str]
     trait: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentCondition:
+    id: str
+    operator: str
+    segment_id: str
+
+
+Condition = AttributeCondition | SegmentCondition
+
+
+@dataclass(frozen=True, slots=True)
+class Segment:
+    groups: list[list[AttributeCondition]] = field(default_factory=list)
+
+
+Segments = dict[str, Segment]
 
 
 @dataclass(frozen=True, slots=True)

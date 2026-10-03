@@ -11,7 +11,7 @@ from typing import Any, Literal, cast, overload
 from urllib.parse import urlparse
 
 from ._bundle import ConfigBundle
-from ._evaluation import Config, ConfigEvaluator, EvaluationContext
+from ._evaluation import Config, ConfigEvaluator, EvaluationContext, Segments
 from ._http import HttpClient
 from ._logger import get_default_logger
 from ._telemetry import (
@@ -141,6 +141,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         self._ready = False
         self._closed = False
         self._configs: dict[str, Config] | None = None
+        self._segments: Segments = {}
         self._watchers: dict[str, list[_Watcher]] = {}
         self._event_handlers: dict[str, list[Callable[[Any], None]]] = {name: [] for name in _EVENT_NAMES}
         self._ready_event = threading.Event()
@@ -272,8 +273,11 @@ class _ConfigDirectorClient(ConfigDirectorClient):
                             replacement[key] = previous[key]
                     removed_keys = sorted(key for key in previous if key not in replacement)
                 self._configs = replacement
+                self._segments = dict(bundle.segments)
             else:
                 previous.update(bundle.configs)
+                self._segments = {**self._segments, **bundle.segments}
+            segments = self._segments
 
             first_bundle = not self._ready
             self._ready = True
@@ -294,14 +298,16 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             removed_keys,
         )
         self._emit("configs_updated", ConfigsUpdatedEvent(keys=keys, removed_keys=removed_keys))
-        self._notify_watchers(watchers, bundle.configs)
+        self._notify_watchers(watchers, bundle.configs, segments)
 
         if first_bundle:
             self._ready_event.set()
             self._emit("client_ready", ClientReadyEvent())
             self._logger.debug("Received the initial payload from the server, the client is ready")
 
-    def _notify_watchers(self, watchers: dict[str, list[_Watcher]], configs: dict[str, Config]) -> None:
+    def _notify_watchers(
+        self, watchers: dict[str, list[_Watcher]], configs: dict[str, Config], segments: Segments
+    ) -> None:
         # Evaluated against the bundle rather than the merged state: for a key the update carried
         # the two hold the same definition, and a removed key has none, so its watchers get the
         # default.
@@ -309,7 +315,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             definition = configs.get(config_key)
             for watcher in entries:
                 try:
-                    value = self._evaluate(config_key, definition, watcher.default, watcher.context)
+                    value = self._evaluate(config_key, definition, watcher.default, watcher.context, segments)
                     watcher.handler(value)
                 except Exception as error:
                     # One faulty watcher must not cost the others their update, and it must not
@@ -342,8 +348,9 @@ class _ConfigDirectorClient(ConfigDirectorClient):
 
         with self._lock:
             definition = self._configs.get(config_key) if self._configs is not None else None
+            segments = self._segments
 
-        return self._evaluate(config_key, definition, default, context)
+        return self._evaluate(config_key, definition, default, context, segments)
 
     def _evaluate(
         self,
@@ -351,6 +358,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         definition: Config | None,
         default: ConfigValueT,
         context: Context | None,
+        segments: Segments,
     ) -> ConfigValueT:
         if definition is None:
             reason: EvaluationReason = "config-state-missing" if self.is_ready else "client-not-ready"
@@ -371,7 +379,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             return default
 
         state = self._evaluator.evaluate(
-            definition, EvaluationContext(context=context, metadata=self._metadata)
+            definition, EvaluationContext(context=context, metadata=self._metadata), segments
         )
         result = parse_config_value(state, default)
         value_id = result.value_id or value_id_for(result.value, state.type)
@@ -425,10 +433,12 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             else:
                 requested = set(config_keys)
                 definitions = {key: config for key, config in self._configs.items() if key in requested}
+            segments = self._segments
 
         evaluation_context = EvaluationContext(context=context, metadata=self._metadata)
         return {
-            key: self._evaluator.evaluate(config, evaluation_context) for key, config in definitions.items()
+            key: self._evaluator.evaluate(config, evaluation_context, segments)
+            for key, config in definitions.items()
         }
 
     # -- watching ---------------------------------------------------------------------

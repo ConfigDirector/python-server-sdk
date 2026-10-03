@@ -10,7 +10,7 @@ from .date_comparison import compare_date
 from .numeric_comparison import compare_numeric
 from .semver_comparison import compare_semver
 from .text_comparison import compare_text
-from .types import Condition, EvaluationContext
+from .types import AttributeCondition, EvaluationContext
 
 __all__ = ["evaluate_condition"]
 
@@ -26,7 +26,7 @@ _EMPTY_CONTEXT = Context()
 _EMPTY_METADATA = Metadata()
 
 
-def evaluate_condition(condition: Condition, context: EvaluationContext | None = None) -> bool:
+def evaluate_condition(condition: AttributeCondition, context: EvaluationContext | None = None) -> bool:
     value = _resolve(condition, context)
     if value is _UNKNOWN_ATTRIBUTE:
         return False
@@ -48,7 +48,7 @@ def evaluate_condition(condition: Condition, context: EvaluationContext | None =
             return False
 
 
-def _resolve(condition: Condition, context: EvaluationContext | None) -> Any:
+def _resolve(condition: AttributeCondition, context: EvaluationContext | None) -> Any:
     match condition.attribute:
         case "identifier":
             return _or_absent(_context_of(context).id)

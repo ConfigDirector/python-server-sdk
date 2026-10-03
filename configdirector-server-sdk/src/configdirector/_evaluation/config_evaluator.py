@@ -6,13 +6,17 @@ from ..types import ConfigDirectorLogger, ConfigState
 from ._json_value import to_json_string
 from .condition_evaluator import evaluate_condition
 from .percent_hashing import PERCENTAGE_WITHOUT_IDENTIFIER, assign_percentage
+from .segment_evaluator import evaluate_segment_condition
 from .types import (
+    Condition,
     ConditionalRule,
     Config,
     EvaluationContext,
     Percentage,
     PercentageRule,
     Rule,
+    SegmentCondition,
+    Segments,
 )
 
 __all__ = ["ConfigEvaluator"]
@@ -35,8 +39,13 @@ class ConfigEvaluator:
     def __init__(self, logger: ConfigDirectorLogger) -> None:
         self._logger = logger
 
-    def evaluate(self, config: Config, context: EvaluationContext | None = None) -> ConfigState:
-        value, value_id = self._get_config_value(config, context)
+    def evaluate(
+        self,
+        config: Config,
+        context: EvaluationContext | None = None,
+        segments: Segments | None = None,
+    ) -> ConfigState:
+        value, value_id = self._get_config_value(config, context, segments)
         return ConfigState(
             id=config.id,
             key=config.key,
@@ -48,20 +57,22 @@ class ConfigEvaluator:
     # Returns the selected value together with the server's ID for it. The two travel as a pair
     # because which rule produced the value is the only thing that says which ID belongs to it.
     def _get_config_value(
-        self, config: Config, context: EvaluationContext | None
+        self, config: Config, context: EvaluationContext | None, segments: Segments | None
     ) -> tuple[str | None, str | None]:
         rules = sorted(
             config.target.rules,
             key=lambda rule: _LAST if rule.order is None else rule.order,
         )
         for rule in rules:
-            result = self._evaluate_rule(rule, config, context)
+            result = self._evaluate_rule(rule, config, context, segments)
             if result.matched:
                 return result.value, result.value_id
 
         return config.target.default_value, config.target.default_value_id
 
-    def _evaluate_rule(self, rule: Rule, config: Config, context: EvaluationContext | None) -> _RuleResult:
+    def _evaluate_rule(
+        self, rule: Rule, config: Config, context: EvaluationContext | None, segments: Segments | None
+    ) -> _RuleResult:
         try:
             # Gated on the wire value as well as the Python type, so that a rule kind this version
             # of the SDK does not know about is skipped instead of crashing. The isinstance is what
@@ -70,7 +81,7 @@ class ConfigEvaluator:
             if rule.type == "percentage" and isinstance(rule, PercentageRule):
                 return self._evaluate_percentage(rule.percentages, config, context)
             if rule.type == "conditional" and isinstance(rule, ConditionalRule):
-                return self._evaluate_conditional_rule(rule, config, context)
+                return self._evaluate_conditional_rule(rule, config, context, segments)
         except Exception as error:  # malformed rule data must not break the evaluation
             self._logger.warning(
                 "There was an error while evaluating a targeting rule %r for %r. "
@@ -113,11 +124,20 @@ class ConfigEvaluator:
         rule: ConditionalRule,
         config: Config,
         context: EvaluationContext | None,
+        segments: Segments | None,
     ) -> _RuleResult:
-        if not all(evaluate_condition(condition, context) for condition in rule.conditions or []):
+        if not all(_condition_holds(condition, context, segments) for condition in rule.conditions or []):
             return _NO_MATCH
         if rule.target == "value" and rule.value is not None:
             return _RuleResult(matched=True, value=to_json_string(rule.value), value_id=rule.value_id)
         if rule.target == "percentage":
             return self._evaluate_percentage(rule.percentages, config, context)
         return _NO_MATCH
+
+
+def _condition_holds(
+    condition: Condition, context: EvaluationContext | None, segments: Segments | None
+) -> bool:
+    if isinstance(condition, SegmentCondition):
+        return evaluate_segment_condition(condition, segments, context)
+    return evaluate_condition(condition, context)

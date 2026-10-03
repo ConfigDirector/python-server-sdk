@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from configdirector import Context, Metadata
-from configdirector._evaluation import Condition, EvaluationContext, evaluate_condition
+from configdirector._evaluation import AttributeCondition, EvaluationContext, evaluate_condition
 
 
 def ctx(**kwargs: Any) -> EvaluationContext:
@@ -26,8 +26,8 @@ def condition(
     target_type: str = "text",
     attribute: str = "identifier",
     trait: str | None = None,
-) -> Condition:
-    return Condition(
+) -> AttributeCondition:
+    return AttributeCondition(
         id="a",
         attribute=attribute,
         trait=trait,
@@ -40,7 +40,7 @@ def condition(
 class TestTextComparisonConditions:
     @pytest.mark.parametrize("operator", ["equals", "="])
     def test_evaluates_identifier_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -55,7 +55,7 @@ class TestTextComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["does NOT equal", "!=", "does not equal"])
     def test_evaluates_identifier_not_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -69,7 +69,7 @@ class TestTextComparisonConditions:
         assert evaluate_condition(condition, ctx(id="123456")) is False
 
     def test_evaluates_identifier_is_one_of(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -87,7 +87,7 @@ class TestTextComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["is NOT one of", "is not one of"])
     def test_evaluates_identifier_is_not_one_of(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -105,7 +105,7 @@ class TestTextComparisonConditions:
         assert evaluate_condition(condition, ctx(id="FG")) is False
 
     def test_evaluates_identifier_starts_with_any_of(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -123,7 +123,7 @@ class TestTextComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["does NOT start with any of", "does not start with any of"])
     def test_evaluates_identifier_does_not_start_with_any_of(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -142,7 +142,7 @@ class TestTextComparisonConditions:
         assert evaluate_condition(condition, ctx(id="FGH")) is False
 
     def test_evaluates_identifier_ends_with_any_of(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -160,7 +160,7 @@ class TestTextComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["does NOT end with any of", "does not end with any of"])
     def test_evaluates_identifier_does_not_end_with_any_of(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -180,7 +180,7 @@ class TestTextComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["equals", "="])
     def test_evaluates_name_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="name",
             trait=None,
@@ -195,7 +195,7 @@ class TestTextComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["equals", "="])
     def test_evaluates_app_name_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="appName",
             trait=None,
@@ -210,7 +210,7 @@ class TestTextComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["equals", "="])
     def test_evaluates_top_level_trait_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/city",
@@ -227,7 +227,7 @@ class TestTextComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["equals", "="])
     def test_evaluates_nested_trait_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/location/city",
@@ -329,7 +329,7 @@ class TestTextComparisonConditions:
 class TestNumberComparisonConditions:
     @pytest.mark.parametrize("operator", ["=", "equals"])
     def test_evaluates_identifier_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -344,7 +344,7 @@ class TestNumberComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["!=", "does NOT equal", "does not equal"])
     def test_evaluates_identifier_not_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -358,7 +358,7 @@ class TestNumberComparisonConditions:
         assert evaluate_condition(condition, ctx(id="123456")) is False
 
     def test_evaluates_identifier_greater_than(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -374,7 +374,7 @@ class TestNumberComparisonConditions:
         assert evaluate_condition(condition, ctx()) is False
 
     def test_evaluates_identifier_greater_than_or_equal(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -390,7 +390,7 @@ class TestNumberComparisonConditions:
         assert evaluate_condition(condition, ctx()) is False
 
     def test_evaluates_identifier_less_than(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -406,7 +406,7 @@ class TestNumberComparisonConditions:
         assert evaluate_condition(condition, ctx()) is False
 
     def test_evaluates_identifier_less_than_or_equal(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="identifier",
             trait=None,
@@ -422,7 +422,7 @@ class TestNumberComparisonConditions:
         assert evaluate_condition(condition, ctx()) is False
 
     def test_evaluates_trait_greater_than_numeric_and_string_values(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/profile/age",
@@ -471,7 +471,7 @@ class TestNumberComparisonConditions:
 
 class TestSemverComparisonConditions:
     def test_evaluates_trait_greater_than(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/system/version",
@@ -487,7 +487,7 @@ class TestSemverComparisonConditions:
         assert evaluate_condition(condition, traits({})) is False
 
     def test_evaluates_trait_greater_than_or_equal(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/system/version",
@@ -503,7 +503,7 @@ class TestSemverComparisonConditions:
         assert evaluate_condition(condition, traits({})) is False
 
     def test_evaluates_trait_less_than(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/system/version",
@@ -520,7 +520,7 @@ class TestSemverComparisonConditions:
         assert evaluate_condition(condition, traits({})) is False
 
     def test_evaluates_trait_less_than_or_equal(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/system/version",
@@ -536,7 +536,7 @@ class TestSemverComparisonConditions:
         assert evaluate_condition(condition, traits({})) is False
 
     def test_evaluates_trait_is_one_of(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/system/v",
@@ -554,7 +554,7 @@ class TestSemverComparisonConditions:
         assert evaluate_condition(condition, traits({})) is False
 
     def test_evaluates_trait_equals(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/system/v",
@@ -570,7 +570,7 @@ class TestSemverComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["is NOT one of", "is not one of"])
     def test_evaluates_trait_is_not_one_of(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/system/v",
@@ -587,7 +587,7 @@ class TestSemverComparisonConditions:
         assert evaluate_condition(condition, traits({"system": {"v": "0.1.645-a"}})) is False
 
     def test_evaluates_app_version_greater_than_or_equal(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="appVersion",
             trait=None,
@@ -619,7 +619,7 @@ class TestSemverComparisonConditions:
 
 class TestDatetimeComparisonConditions:
     def test_evaluates_trait_is_before(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/date",
@@ -635,7 +635,7 @@ class TestDatetimeComparisonConditions:
         assert evaluate_condition(condition, traits({})) is False
 
     def test_evaluates_trait_is_after(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/date",
@@ -653,7 +653,7 @@ class TestDatetimeComparisonConditions:
 
 class TestArrayComparisonConditions:
     def test_evaluates_trait_contains_any_of(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/tags",
@@ -673,7 +673,7 @@ class TestArrayComparisonConditions:
 
     @pytest.mark.parametrize("operator", ["does NOT contain any of", "does not contain any of"])
     def test_evaluates_trait_does_not_contain_any_of(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait="/tags",
@@ -722,7 +722,7 @@ class TestArrayComparisonConditions:
 
 class TestEdgeCases:
     def test_returns_false_for_unknown_attribute(self) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="unknownAttribute",
             trait=None,
@@ -735,7 +735,7 @@ class TestEdgeCases:
 
     @pytest.mark.parametrize("operator", ["equals", "="])
     def test_evaluates_app_version_with_text_equals(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="appVersion",
             trait=None,
@@ -750,7 +750,7 @@ class TestEdgeCases:
 
     @pytest.mark.parametrize("operator", ["equals", "="])
     def test_returns_false_when_traits_path_is_missing(self, operator: str) -> None:
-        condition = Condition(
+        condition = AttributeCondition(
             id="a",
             attribute="traits",
             trait=None,
