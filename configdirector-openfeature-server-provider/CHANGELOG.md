@@ -6,10 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-05
+
 ### Added
 
 - Targeting rules can now use segments: the provider evaluates segment conditions through the
-  server SDK. Requires the server SDK release that reads the payload's segments. ConfigDirector only sends rules with segment conditions to provider versions that
+  server SDK. Requires `configdirector-server-sdk` 1.6.0 or later, which reads the payload's
+  segments. ConfigDirector only sends rules with segment conditions to provider versions that
   evaluate them, so upgrading is what makes rules that use segments apply to this application.
 
 ## [1.3.0] - 2026-10-01

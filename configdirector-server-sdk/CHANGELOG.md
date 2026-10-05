@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-05
+
 ### Added
 
 - Targeting rules can now use segments. The SDK reads the `segments` section of the server payload
