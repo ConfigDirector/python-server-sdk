@@ -1220,3 +1220,53 @@ class TestSegments:
         )
 
         assert received == ["bonjour", "salut"]
+
+    def test_calls_the_watchers_of_the_configs_whose_rules_use_a_segment_a_delta_carries_without_them(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "bonjour")]),
+            config("farewell", "bye"),
+            config("welcome", "hi", rules=[self.rule_serving_members_of(self.BETA, "welcome")]),
+            segments={self.ACME: self.members_of("@acme.com"), self.BETA: self.members_of("@acme.com")},
+        )
+        updates: list[ConfigsUpdatedEvent] = []
+        greetings: list[str] = []
+        farewells: list[str] = []
+        welcomes: list[str] = []
+        client.on("configs_updated", updates.append)
+        client.watch("greeting", "in-code-default", greetings.append, self.MEMBER)
+        client.watch("farewell", "in-code-default", farewells.append, self.MEMBER)
+        client.watch("welcome", "in-code-default", welcomes.append, self.MEMBER)
+        client.initialize()
+
+        transports.last.deliver(bundle(kind="delta", segments={self.ACME: self.members_of("@other.com")}))
+
+        assert updates[-1] == ConfigsUpdatedEvent(keys=["greeting"], removed_keys=[])
+        assert greetings == ["bonjour", "hello"]
+        assert farewells == ["bye"]
+        assert welcomes == ["welcome"]
+
+    def test_lists_a_config_once_when_a_delta_carries_it_with_a_segment_its_rules_use(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        transports.initial_bundle = bundle(
+            config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "bonjour")]),
+            segments={self.ACME: self.members_of("@acme.com")},
+        )
+        updates: list[ConfigsUpdatedEvent] = []
+        greetings: list[str] = []
+        client.on("configs_updated", updates.append)
+        client.watch("greeting", "in-code-default", greetings.append, self.MEMBER)
+        client.initialize()
+
+        transports.last.deliver(
+            bundle(
+                config("greeting", "hello", rules=[self.rule_serving_members_of(self.ACME, "salut")]),
+                kind="delta",
+                segments={self.ACME: self.members_of("@acme.com")},
+            )
+        )
+
+        assert updates[-1] == ConfigsUpdatedEvent(keys=["greeting"], removed_keys=[])
+        assert greetings == ["bonjour", "salut"]

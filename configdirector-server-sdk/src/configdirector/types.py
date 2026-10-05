@@ -216,7 +216,8 @@ class ConfigsUpdatedEvent:
     """Emitted whenever config definitions are received from the server.
 
     Attributes:
-        keys: The config keys included in the update, sorted.
+        keys: The config keys included in the update, and the keys of every config whose
+            targeting rules use a segment the update included, sorted.
         removed_keys: The keys a full update no longer included, so the client stopped serving
             them, sorted. Empty when nothing was removed, and always empty for a delta update.
     """
@@ -237,7 +238,8 @@ ClientEvent = Literal["client_ready", "configs_updated", "config_evaluated"]
 
 WatchHandler = Callable[[ConfigValueT], None]
 """A callback invoked with the newly evaluated value whenever an update carries the watched
-config, and with the default whenever a full update no longer carries it."""
+config or a segment its targeting rules use, and with the default whenever a full update no
+longer carries it."""
 
 ClientReadyHandler = Callable[[ClientReadyEvent], None]
 """A handler for the ``client_ready`` event."""
@@ -449,7 +451,8 @@ class ConfigDirectorClient(Protocol):
         context: Context | None = None,
     ) -> Subscription:
         """Call ``callback`` with the newly evaluated value whenever an update carries
-        ``config_key``, and with ``default`` whenever a full update no longer carries it.
+        ``config_key`` or a segment its targeting rules use, and with ``default`` whenever a full
+        update no longer carries it.
 
         The callback runs on the SDK's background connection thread rather than the thread that
         registered it, so it should be quick and thread-safe. An exception it raises is logged
@@ -460,7 +463,7 @@ class ConfigDirectorClient(Protocol):
             default: The value passed to the callback when config state is unavailable or the
                 config was removed. Its type also determines the type the config is parsed as.
             callback: Called with the newly evaluated value on every update that carries or
-                removes ``config_key``.
+                removes ``config_key``, or that carries a segment its targeting rules use.
             context: The user's context, used for targeting rule evaluation.
 
         Returns:

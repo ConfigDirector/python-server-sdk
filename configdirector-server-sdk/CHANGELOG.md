@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- A segment change now reaches watchers. When an update from the server carries a segment, the
+  watchers of every config whose targeting rules use that segment are called with the newly
+  evaluated value, and `ConfigsUpdatedEvent.keys` lists those configs beside the configs the
+  update included. Before, editing a segment or one of its environment overrides changed the
+  values served without calling any watcher, and `configs_updated` reported no keys.
+
 ## [1.6.0] - 2026-10-05
 
 ### Added
