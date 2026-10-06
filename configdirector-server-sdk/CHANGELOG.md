@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-10-05
+
 ### Fixed
 
 - A segment change now reaches watchers. When an update from the server carries a segment, the
