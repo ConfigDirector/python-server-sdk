@@ -57,7 +57,8 @@ exactly one place per package, which Hatch reads the package version from:
 3. Run the package's release workflow against `main`. It is manual (`workflow_dispatch`) by
    design, and releases whatever version `main` currently declares. It builds the distributions
    with `make release-check`, publishes this package's to TestPyPI, and then to PyPI, using
-   trusted publishing rather than stored tokens.
+   trusted publishing rather than stored tokens. When TestPyPI is down, clear
+   `publish-to-testpypi` to skip it and publish straight to PyPI.
 
 The workflow tags the released commit `<package>-vX.Y.Z`, for example
 `configdirector-server-sdk-v1.2.0`, only after the upload to PyPI succeeds, and refuses to run
