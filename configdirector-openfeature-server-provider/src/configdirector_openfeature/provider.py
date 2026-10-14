@@ -56,8 +56,11 @@ class ConfigDirectorProvider(AbstractProvider):
 
     The OpenFeature evaluation context maps onto the ConfigDirector
     :class:`~configdirector.Context`: the targeting key, or failing that an ``id`` attribute,
-    becomes the context's id, ``name`` its name, a ``traits`` mapping its traits, and a boolean
-    ``anonymous`` its anonymous flag.
+    becomes the context's id, ``kind`` its kind, ``name`` its name, a ``traits`` mapping its
+    traits, and a boolean ``anonymous`` its anonymous flag. Without a ``kind`` attribute the
+    context is a ``user``, and a ``kind`` inside ``traits`` is an ordinary trait. When the kind is
+    invalid, including any kind that is not a string, the whole context is ignored: the evaluation
+    still resolves successfully, to the value for no context, and the SDK logs an error.
 
     If the first config state does not arrive within the configured timeout, initialization
     still completes and evaluations return their defaults with the error code

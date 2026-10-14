@@ -39,6 +39,12 @@ class FakeReporter:
     def contexts(self) -> list[str]:
         return [c.id or "" for report in self.reports for c in report.contexts]
 
+    @property
+    def invalid_contexts(self) -> list[tuple[str | None, int]]:
+        return [
+            (entry.kind_sample, entry.count) for report in self.reports for entry in report.invalid_contexts
+        ]
+
 
 @pytest.fixture
 def reporter() -> FakeReporter:
@@ -224,6 +230,41 @@ class TestContexts:
 
         assert reporter.contexts == ["user-a", "user-b"]
 
+    def test_captures_contexts_of_different_kinds_sharing_an_identifier_separately(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        user = Context(id="42", name="Ada")
+        device = Context(id="42", name="Kiosk", kind="device")
+        record(collector, context=user)
+        record(collector, context=device)
+
+        collector.flush()
+
+        assert reporter.reports[0].contexts == [user, device]
+
+    def test_tags_each_event_with_the_kind_of_its_context(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        record(collector, context=Context(id="42"))
+        record(collector, context=Context(id="42", kind="device"))
+
+        collector.flush()
+
+        events = [aggregated.event for aggregated in reporter.reports[0].evaluations]
+        assert [(event.context_id, event.context_kind) for event in events] == [
+            ("42", "user"),
+            ("42", "device"),
+        ]
+
+    def test_an_event_without_a_captured_context_has_no_kind(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        record(collector, context=Context(name="No Id", kind="device"))
+
+        collector.flush()
+
+        assert reporter.reports[0].evaluations[0].event.context_kind is None
+
     def test_reports_how_many_contexts_were_dropped(
         self, make_collector: Factory, reporter: FakeReporter
     ) -> None:
@@ -235,6 +276,140 @@ class TestContexts:
 
         assert reporter.reports[0].dropped_contexts == 5
         assert len(reporter.reports[0].contexts) == 30
+
+
+class TestInvalidContexts:
+    def test_counts_the_submissions_of_each_invalid_kind(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        collector.record_invalid_context("Device")
+        collector.record_invalid_context("")
+        collector.record_invalid_context("Device")
+
+        collector.flush()
+
+        assert reporter.invalid_contexts == [("Device", 2), ("", 1)]
+
+    def test_says_whether_a_kind_sample_is_new_to_the_interval(self, collector: TelemetryCollector) -> None:
+        assert collector.record_invalid_context("Device") == "new-kind-sample"
+        assert collector.record_invalid_context("Device") == "known-kind-sample"
+        assert collector.record_invalid_context("Tenant") == "new-kind-sample"
+
+    def test_keeps_20_kind_samples_and_counts_further_submissions_without_one(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        for index in range(20):
+            collector.record_invalid_context(f"Kind-{index}")
+
+        recordings = [
+            collector.record_invalid_context("Kind-20"),
+            collector.record_invalid_context("Kind-21"),
+            collector.record_invalid_context("Kind-20"),
+            collector.record_invalid_context("Kind-0"),
+        ]
+        collector.flush()
+
+        assert recordings == [
+            "first-beyond-sample-limit",
+            "beyond-sample-limit",
+            "beyond-sample-limit",
+            "known-kind-sample",
+        ]
+        assert reporter.invalid_contexts == [
+            *((f"Kind-{index}", 2 if index == 0 else 1) for index in range(20)),
+            (None, 3),
+        ]
+
+    def test_a_flush_starts_the_kind_samples_over(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        for index in range(21):
+            collector.record_invalid_context(f"Kind-{index}")
+        collector.flush()
+
+        assert collector.record_invalid_context("Kind-0") == "new-kind-sample"
+        assert collector.record_invalid_context("Kind-20") == "new-kind-sample"
+        collector.flush()
+        assert reporter.invalid_contexts[-2:] == [("Kind-0", 1), ("Kind-20", 1)]
+
+    def test_reports_the_window_the_submissions_were_made_in(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        collector.record_invalid_context("Device")
+        record(collector)
+
+        collector.flush()
+
+        entry = reporter.reports[0].invalid_contexts[0]
+        assert entry.start_time <= entry.end_time
+        assert entry.start_time <= reporter.reports[0].evaluations[0].start_time
+
+    def test_reports_invalid_contexts_when_nothing_else_was_recorded(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        collector.record_invalid_context("Device")
+
+        collector.flush()
+
+        assert len(reporter.reports) == 1
+        assert reporter.reports[0].evaluations == []
+
+    def test_stops_reporting_invalid_contexts_after_a_fatal_response(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        reporter.response = ReporterResponse(success=False, fatal=True)
+        record(collector)
+        collector.flush()
+
+        collector.record_invalid_context("Device")
+        collector.flush()
+
+        assert len(reporter.reports) == 1
+        assert reporter.invalid_contexts == []
+
+    def test_after_a_fatal_response_each_kind_sample_stays_known_for_good(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        reporter.response = ReporterResponse(success=False, fatal=True)
+        record(collector)
+        collector.flush()
+
+        first = collector.record_invalid_context("Device")
+        collector.flush()
+        second = collector.record_invalid_context("Device")
+
+        assert (first, second) == ("new-kind-sample", "known-kind-sample")
+
+    def test_reports_invalid_contexts_left_on_close(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        collector.record_invalid_context("Device")
+
+        collector.close()
+
+        assert reporter.invalid_contexts == [("Device", 1)]
+
+    def test_after_close_invalid_contexts_are_not_reported_and_each_kind_sample_stays_known(
+        self, collector: TelemetryCollector, reporter: FakeReporter
+    ) -> None:
+        collector.close()
+
+        first = collector.record_invalid_context("Device")
+        collector.flush()
+        second = collector.record_invalid_context("Device")
+
+        assert (first, second) == ("new-kind-sample", "known-kind-sample")
+        assert reporter.reports == []
+
+    def test_after_close_keeps_logging_bounded_to_20_kind_samples(
+        self, collector: TelemetryCollector
+    ) -> None:
+        collector.close()
+        for index in range(20):
+            collector.record_invalid_context(f"Kind-{index}")
+
+        assert collector.record_invalid_context("Kind-20") == "first-beyond-sample-limit"
+        assert collector.record_invalid_context("Kind-21") == "beyond-sample-limit"
 
 
 class TestFlushInterval:

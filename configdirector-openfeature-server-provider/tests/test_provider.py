@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from configdirector import ConfigDirectorValidationError, Metadata
 from openfeature import api
@@ -196,6 +198,52 @@ class TestContext:
             details = provider.resolve_string_details(key, "default", context)
             assert (key, details.value, details.variant) == (key, "matched", "rule-value-matched")
             assert provider.resolve_string_details(key, "default").value == "nobody"
+
+
+class TestContextKind:
+    @pytest.fixture
+    def provider(self, serve: ServerFactory, provide: ProviderFactory) -> ConfigDirectorProvider:
+        server = serve(
+            config("by-key", "string", "nobody", [rule("identifier", "user-1", "matched")]),
+            config("by-kind", "string", "nobody", [rule("kind", "device", "matched")]),
+        )
+        provider = provide(server)
+        provider.initialize(EvaluationContext())
+        return provider
+
+    def test_targets_by_the_mapped_kind(self, provider: ConfigDirectorProvider) -> None:
+        device = provider.resolve_string_details(
+            "by-kind", "default", EvaluationContext("42", {"kind": "device"})
+        )
+        user = provider.resolve_string_details("by-kind", "default", EvaluationContext("42"))
+
+        assert (device.value, device.variant) == ("matched", "rule-value-matched")
+        assert (user.value, user.variant) == ("nobody", "default-of-by-kind")
+
+    def test_a_kind_inside_traits_does_not_set_the_kind(self, provider: ConfigDirectorProvider) -> None:
+        details = provider.resolve_string_details(
+            "by-kind", "default", EvaluationContext("42", {"traits": {"kind": "device"}})
+        )
+
+        assert details.value == "nobody"
+
+    @pytest.mark.parametrize("kind", ["Device", "", 42])
+    def test_an_invalid_kind_resolves_successfully_to_the_value_for_no_context(
+        self, provider: ConfigDirectorProvider, kind: Any
+    ) -> None:
+        without_a_context = provider.resolve_string_details("by-key", "default")
+
+        details = provider.resolve_string_details(
+            "by-key", "default", EvaluationContext("user-1", {"kind": kind})
+        )
+
+        assert (details.value, details.reason, details.variant, details.error_code) == (
+            "nobody",
+            Reason.TARGETING_MATCH,
+            "default-of-by-key",
+            None,
+        )
+        assert details == without_a_context
 
 
 class TestLifecycle:

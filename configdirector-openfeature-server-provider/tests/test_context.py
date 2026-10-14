@@ -34,6 +34,28 @@ def test_falls_back_to_the_id_attribute() -> None:
     assert to_context(EvaluationContext(None, {"id": "attribute"})) == Context(id="attribute")
 
 
+def test_maps_a_top_level_kind() -> None:
+    assert to_context(EvaluationContext("42", {"kind": "device"})) == Context(id="42", kind="device")
+
+
+def test_leaves_the_kind_out_when_there_is_none() -> None:
+    assert to_context(EvaluationContext("42", {"name": "Ada"})) == Context(id="42", name="Ada", kind=None)
+
+
+def test_a_kind_inside_traits_stays_an_ordinary_trait() -> None:
+    context = to_context(EvaluationContext("42", {"traits": {"kind": "device"}}))
+
+    assert context == Context(id="42", traits={"kind": "device"}, kind=None)
+
+
+@pytest.mark.parametrize("kind", [42, True, 1.5, ["device"], {"name": "device"}])
+def test_passes_a_kind_that_is_not_a_str_through_unchanged(kind: Any) -> None:
+    context = to_context(EvaluationContext("42", {"kind": kind}))
+
+    assert context is not None
+    assert context.kind == kind
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [

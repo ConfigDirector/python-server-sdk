@@ -326,6 +326,67 @@ class TestTextComparisonConditions:
             assert evaluate_condition(c, traits({"plan": "Premium"})) is expected
 
 
+class TestKindConditions:
+    def test_a_context_without_a_kind_is_a_user(self) -> None:
+        context = ctx(id="42")
+
+        assert evaluate_condition(condition("equals", ["user"], attribute="kind"), context) is True
+        assert evaluate_condition(condition("does NOT equal", ["device"], attribute="kind"), context) is True
+        assert (
+            evaluate_condition(condition("is one of", ["device", "tenant"], attribute="kind"), context)
+            is False
+        )
+        assert evaluate_condition(condition("is NOT one of", ["device"], attribute="kind"), context) is True
+
+    def test_a_context_whose_kind_is_user(self) -> None:
+        context = ctx(id="42", kind="user")
+
+        assert evaluate_condition(condition("equals", ["user"], attribute="kind"), context) is True
+        assert evaluate_condition(condition("does NOT equal", ["device"], attribute="kind"), context) is True
+        assert (
+            evaluate_condition(condition("is one of", ["device", "tenant"], attribute="kind"), context)
+            is False
+        )
+        assert evaluate_condition(condition("is NOT one of", ["device"], attribute="kind"), context) is True
+
+    def test_a_context_whose_kind_is_device(self) -> None:
+        context = ctx(id="42", kind="device")
+
+        assert evaluate_condition(condition("equals", ["user"], attribute="kind"), context) is False
+        assert evaluate_condition(condition("does NOT equal", ["device"], attribute="kind"), context) is False
+        assert (
+            evaluate_condition(condition("is one of", ["device", "tenant"], attribute="kind"), context)
+            is True
+        )
+        assert evaluate_condition(condition("is NOT one of", ["device"], attribute="kind"), context) is False
+
+    def test_a_context_whose_kind_is_tenant(self) -> None:
+        context = ctx(id="42", kind="tenant")
+
+        assert evaluate_condition(condition("equals", ["user"], attribute="kind"), context) is False
+        assert evaluate_condition(condition("does NOT equal", ["device"], attribute="kind"), context) is True
+        assert (
+            evaluate_condition(condition("is one of", ["device", "tenant"], attribute="kind"), context)
+            is True
+        )
+        assert evaluate_condition(condition("is NOT one of", ["device"], attribute="kind"), context) is True
+
+    def test_an_evaluation_without_a_context_is_a_user(self) -> None:
+        assert (
+            evaluate_condition(condition("equals", ["user"], attribute="kind"), EvaluationContext()) is True
+        )
+        assert evaluate_condition(condition("equals", ["user"], attribute="kind")) is True
+
+    def test_a_trait_named_kind_is_an_ordinary_trait(self) -> None:
+        context = ctx(id="42", kind="device", traits={"kind": "tenant"})
+
+        assert evaluate_condition(condition("equals", ["device"], attribute="kind"), context) is True
+        assert (
+            evaluate_condition(condition("equals", ["tenant"], attribute="traits", trait="/kind"), context)
+            is True
+        )
+
+
 class TestNumberComparisonConditions:
     @pytest.mark.parametrize("operator", ["=", "equals"])
     def test_evaluates_identifier_equals(self, operator: str) -> None:

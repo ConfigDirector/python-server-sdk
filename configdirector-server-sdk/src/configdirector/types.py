@@ -82,12 +82,24 @@ class Context:
             and usable in targeting rules.
         anonymous: When ``True``, the context is used for targeting rule evaluation but is
             not persisted and will not appear in the dashboard. Defaults to ``False``.
+        kind: What kind of entity the context represents, such as ``"device"``,
+            ``"organization"`` or ``"tenant"``. A keyword-only argument. Leaving it out, or passing
+            ``None``, means ``"user"``. A kind has 1 to 64 characters, using only lowercase
+            letters, digits, ``-`` and ``_``, and is used exactly as given, without trimming or
+            changing its case. Contexts of different kinds that share an ``id`` are different
+            contexts, and percentage rollouts assign each kind its own percentile.
+
+            Building a context never fails because of its kind. When a context's kind is
+            invalid, including any kind that is not a ``str``, the SDK ignores the whole
+            context: it evaluates exactly as if no context had been supplied, logs an error, and
+            reports the evaluation's context as ``None``.
     """
 
     id: str | None = None
     name: str | None = None
     traits: dict[str, Any] | None = None
     anonymous: bool = False
+    kind: str | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,7 +444,9 @@ class ConfigDirectorClient(Protocol):
         """Return the evaluated :class:`ConfigState` for every known key.
 
         Intended for server-side rendering hydration. This does **not** record telemetry events,
-        and returns an empty mapping when the client is not yet ready.
+        except that a call given a context with an invalid kind is counted once as an invalid
+        context submission and may log an error. It returns an empty mapping when the client is
+        not yet ready.
 
         Args:
             context: The user's context, used for targeting rule evaluation.

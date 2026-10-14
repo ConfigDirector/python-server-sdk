@@ -36,6 +36,7 @@ The OpenFeature evaluation context maps onto the ConfigDirector context used by 
 | OpenFeature | ConfigDirector |
 |---|---|
 | `targeting_key`, or failing that an `id` attribute | `id` |
+| `kind` attribute | `kind` |
 | `name` attribute | `name` |
 | `traits` attribute, a mapping | `traits` |
 | `anonymous` attribute, a boolean | `anonymous` |
@@ -45,7 +46,12 @@ from openfeature.evaluation_context import EvaluationContext
 
 context = EvaluationContext("user-123", {"name": "Ada", "traits": {"plan": "pro"}})
 new_checkout = client.get_boolean_value("new-checkout", False, context)
+
+device = EvaluationContext("kiosk-7", {"kind": "device"})
+new_checkout = client.get_boolean_value("new-checkout", False, device)
 ```
+
+Without a `kind` attribute the context is a `user`, and a `kind` inside `traits` is an ordinary trait. A kind has 1 to 64 characters, using only lowercase letters, digits, `-` and `_`. When the kind is invalid, including any kind that is not a string, the whole context is ignored: the evaluation still resolves successfully, to the value for no context, and the SDK logs an error.
 
 ## Evaluation details
 

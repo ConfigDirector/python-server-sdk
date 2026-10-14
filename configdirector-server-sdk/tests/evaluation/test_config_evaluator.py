@@ -505,6 +505,52 @@ class TestNoContext:
             assert evaluator.evaluate(config, ctx()).value == "first"
 
 
+class TestPercentageRulesByKind:
+    def _config_split_at_8_and_50(self) -> Config:
+        return Config(
+            id=CONFIG_ID,
+            key="split",
+            type="string",
+            target=TargetingRules(
+                default_value="this-is-the-default",
+                rules=[
+                    PercentageRule(
+                        id=uid(),
+                        order=0,
+                        percentages=[
+                            Percentage(value="below 8", percentage=8, id=uid()),
+                            Percentage(value="8 to 50", percentage=42, id=uid()),
+                            Percentage(value="50 and above", percentage=50, id=uid()),
+                        ],
+                    )
+                ],
+            ),
+        )
+
+    def test_a_context_without_a_kind_keeps_its_user_assignment(self) -> None:
+        assert evaluator.evaluate(self._config_split_at_8_and_50(), ctx(id="user-1")).value == "below 8"
+
+    def test_a_context_whose_kind_is_user_keeps_its_user_assignment(self) -> None:
+        state = evaluator.evaluate(self._config_split_at_8_and_50(), ctx(id="user-1", kind="user"))
+
+        assert state.value == "below 8"
+
+    def test_a_device_with_the_same_identifier_gets_an_assignment_of_its_own(self) -> None:
+        state = evaluator.evaluate(self._config_split_at_8_and_50(), ctx(id="user-1", kind="device"))
+
+        assert state.value == "50 and above"
+
+    def test_a_tenant_with_the_same_identifier_gets_an_assignment_of_its_own(self) -> None:
+        state = evaluator.evaluate(self._config_split_at_8_and_50(), ctx(id="user-1", kind="tenant"))
+
+        assert state.value == "8 to 50"
+
+    def test_a_device_without_an_identifier_lands_in_the_first_bucket(self) -> None:
+        state = evaluator.evaluate(self._config_split_at_8_and_50(), ctx(kind="device"))
+
+        assert state.value == "below 8"
+
+
 @dataclass(frozen=True, slots=True)
 class _UnknownRule:
     id: str

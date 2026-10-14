@@ -8,6 +8,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `Context.kind`, a keyword-only field saying what kind of entity a context represents, for
+  example `Context(id="42", kind="device")`. Leaving it out, or passing `None`, means `user`. A
+  kind has 1 to 64 characters, using only lowercase letters, digits, `-` and `_`, and is used
+  exactly as given, without trimming or changing its case.
+- Targeting rules and segments can match on a context's kind. Percentage rollouts give contexts of
+  other kinds assignments of their own, while `user` contexts keep the ones they have today. A
+  context without an `id` lands in the first bucket whatever its kind.
+- A context with an invalid kind, including any kind that is not a `str`, never makes the SDK
+  raise, and building one never fails. `get_value`, watchers and `get_all_configs` evaluate exactly
+  as if no context had been supplied, with the same value and reason, and `ConfigEvaluation.context`
+  is `None`. The SDK logs an error through the configured logger for each distinct invalid kind at
+  most once per telemetry flush interval; past 20 distinct kinds in an interval it logs once that
+  further kinds are not logged individually. Once telemetry stops, after a fatal response or
+  `close()`, each of the first 20 distinct invalid kinds is logged once for the rest of the client's
+  life, followed by that same single notice. A test client from `configdirector.testing` sends no
+  telemetry, so it logs an error on every read given a context with an invalid kind.
+- Telemetry reports how many evaluations were given a context with an invalid kind, with a sample
+  of each kind cut to 128 characters (the `str()` of a kind that is not a `str`), at most 20
+  samples per report, and never the context's identifier, name or traits. Captured contexts are
+  reported per kind and identifier, so user `42` and device `42` are reported separately, and
+  evaluation events carry the context's kind.
+
+### Changed
+
+- `Context` includes `kind` in its `repr` and in equality: `Context(id="42")` is not equal to
+  `Context(id="42", kind="user")`, although both evaluate the same.
+- `get_all_configs` still records no evaluations, but a call given a context with an invalid kind
+  is counted once as an invalid context submission, and logs as described above.
+
 ## [1.6.1] - 2026-10-05
 
 ### Fixed

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from configdirector import _http
 from configdirector._bundle import BundleKind, ConfigBundle
 from configdirector._evaluation import (
     AttributeCondition,
@@ -16,7 +18,7 @@ from configdirector._evaluation import (
     Segments,
     TargetingRules,
 )
-from configdirector._telemetry import TelemetryCollectorOptions
+from configdirector._telemetry import InvalidContextRecording, TelemetryCollectorOptions
 from configdirector._transport import TransportOptions
 from configdirector.client import _ConfigDirectorClient
 from configdirector.types import (
@@ -74,6 +76,35 @@ class RecordingLogger:
 
     def messages(self, level: str) -> list[str]:
         return [message for recorded, message in self.records if recorded == level]
+
+
+@dataclass
+class Call:
+    url: str
+    body: bytes
+    headers: Mapping[str, str]
+    timeout: float
+
+    @property
+    def payload(self) -> Any:
+        return json.loads(self.body)
+
+
+class StubHttp:
+    def __init__(self) -> None:
+        self.calls: list[Call] = []
+        self.status = 204
+        self.error: BaseException | None = None
+
+    def post(self, url: str, body: bytes, headers: Mapping[str, str], timeout: float) -> _http.HttpResponse:
+        self.calls.append(Call(url=url, body=body, headers=headers, timeout=timeout))
+        if self.error is not None:
+            raise self.error
+        return _http.HttpResponse(status=self.status, body="")
+
+    @property
+    def payload(self) -> Any:
+        return self.calls[-1].payload
 
 
 class FakeTransport:
@@ -139,6 +170,7 @@ class FakeTelemetryCollector:
     def __init__(self, options: TelemetryCollectorOptions) -> None:
         self.options = options
         self.evaluations: list[RecordedEvaluation] = []
+        self.invalid_kind_samples: list[str] = []
         self.closed = False
 
     def record_evaluation(
@@ -165,6 +197,10 @@ class FakeTelemetryCollector:
                 value_id=value_id,
             )
         )
+
+    def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording:
+        self.invalid_kind_samples.append(kind_sample)
+        return "new-kind-sample"
 
     def flush(self) -> None:
         pass

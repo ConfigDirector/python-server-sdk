@@ -83,6 +83,7 @@ class EvaluatedConfigEvent:
     used_default: bool
     evaluation_reason: EvaluationReason
     context_id: str | None = None
+    context_kind: str | None = None
     type: ConfigType | None = None
     evaluated_value_id: str | None = None
 
@@ -96,6 +97,7 @@ class EvaluatedConfigEvent:
         used_default: bool,
         reason: EvaluationReason,
         context_id: str | None = None,
+        context_kind: str | None = None,
         config_type: ConfigType | None = None,
         value_id: str | None = None,
     ) -> EvaluatedConfigEvent:
@@ -107,6 +109,7 @@ class EvaluatedConfigEvent:
             used_default=used_default,
             evaluation_reason=reason,
             context_id=context_id,
+            context_kind=context_kind,
             type=config_type,
             evaluated_value_id=value_id,
         )
@@ -122,6 +125,8 @@ class EvaluatedConfigEvent:
         wire: dict[str, Any] = {}
         if self.context_id is not None:
             wire["contextId"] = self.context_id
+        if self.context_kind is not None:
+            wire["contextKind"] = self.context_kind
         wire["key"] = self.key
         if self.type is not None:
             wire["type"] = self.type

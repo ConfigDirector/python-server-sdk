@@ -111,8 +111,8 @@ class TestEventQueue:
 class TestContextRegistry:
     def test_collects_the_contexts_it_is_given(self) -> None:
         registry = ContextRegistry(10)
-        registry.add("user-a", Context(id="user-a"))
-        registry.add("user-b", Context(id="user-b"))
+        registry.add("user", "user-a", Context(id="user-a"))
+        registry.add("user", "user-b", Context(id="user-b"))
 
         contexts, dropped = registry.take_snapshot()
 
@@ -121,16 +121,25 @@ class TestContextRegistry:
 
     def test_keeps_only_the_most_recent_context_for_an_id(self) -> None:
         registry = ContextRegistry(10)
-        registry.add("user-a", Context(id="user-a"))
-        registry.add("user-a", Context(id="user-a", name="Admin"))
+        registry.add("user", "user-a", Context(id="user-a"))
+        registry.add("user", "user-a", Context(id="user-a", name="Admin"))
 
         contexts, _ = registry.take_snapshot()
 
         assert contexts == [Context(id="user-a", name="Admin")]
 
+    def test_keeps_contexts_of_different_kinds_sharing_an_id_apart(self) -> None:
+        registry = ContextRegistry(10)
+        registry.add("user", "42", Context(id="42"))
+        registry.add("device", "42", Context(id="42", kind="device"))
+
+        contexts, _ = registry.take_snapshot()
+
+        assert contexts == [Context(id="42"), Context(id="42", kind="device")]
+
     def test_a_snapshot_starts_the_next_batch_over(self) -> None:
         registry = ContextRegistry(10)
-        registry.add("user-a", Context(id="user-a"))
+        registry.add("user", "user-a", Context(id="user-a"))
         registry.take_snapshot()
 
         assert registry.take_snapshot() == ([], 0)
@@ -138,7 +147,7 @@ class TestContextRegistry:
     def test_evicts_the_oldest_context_once_full(self) -> None:
         registry = ContextRegistry(2)
         for identifier in ("user-a", "user-b", "user-c", "user-d"):
-            registry.add(identifier, Context(id=identifier))
+            registry.add("user", identifier, Context(id=identifier))
 
         contexts, dropped = registry.take_snapshot()
 
@@ -148,10 +157,10 @@ class TestContextRegistry:
     def test_seeing_a_context_again_does_not_save_it_from_eviction(self) -> None:
         # Re-assigning a key leaves it where it was, which is how the other SDKs behave too.
         registry = ContextRegistry(2)
-        registry.add("user-a", Context(id="user-a"))
-        registry.add("user-b", Context(id="user-b"))
-        registry.add("user-a", Context(id="user-a", name="Admin"))
-        registry.add("user-c", Context(id="user-c"))
+        registry.add("user", "user-a", Context(id="user-a"))
+        registry.add("user", "user-b", Context(id="user-b"))
+        registry.add("user", "user-a", Context(id="user-a", name="Admin"))
+        registry.add("user", "user-c", Context(id="user-c"))
 
         contexts, _ = registry.take_snapshot()
 
@@ -159,8 +168,8 @@ class TestContextRegistry:
 
     def test_clearing_discards_the_contexts_and_the_dropped_count(self) -> None:
         registry = ContextRegistry(1)
-        registry.add("user-a", Context(id="user-a"))
-        registry.add("user-b", Context(id="user-b"))
+        registry.add("user", "user-a", Context(id="user-a"))
+        registry.add("user", "user-b", Context(id="user-b"))
 
         registry.clear()
 

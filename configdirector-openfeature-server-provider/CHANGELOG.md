@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- The provider reads a top-level `kind` attribute of the evaluation context, beside the targeting
+  key, as the ConfigDirector context kind, for example
+  `EvaluationContext("kiosk-7", {"kind": "device"})`. Leaving it out means `user`, and a `kind`
+  inside `traits` stays an ordinary trait. A kind has 1 to 64 characters, using only lowercase
+  letters, digits, `-` and `_`. With any other kind, including one that is not a string, the whole
+  context is ignored: the evaluation still resolves successfully, to the value for no context and
+  without an error code, and the SDK logs an error. Requires `configdirector-server-sdk` 1.7.0 or
+  later, which adds `Context.kind`.
+
+### Changed
+
+- A top-level `kind` attribute in the evaluation context was ignored before. An application that
+  already sets one now has it evaluated as the context kind, and if it is not a valid kind the
+  whole context is ignored as described above.
+
 ## [1.4.1] - 2026-10-05
 
 ### Fixed

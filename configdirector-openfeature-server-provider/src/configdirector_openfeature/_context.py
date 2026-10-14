@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from configdirector import Context
 from openfeature.evaluation_context import EvaluationContext
@@ -24,6 +24,7 @@ def to_context(evaluation_context: EvaluationContext | None) -> Context | None:
         name=_text(attributes.get("name")),
         traits=to_plain(traits) if isinstance(traits, Mapping) and traits else None,
         anonymous=anonymous if isinstance(anonymous, bool) else False,
+        kind=cast("str | None", attributes.get("kind")),
     )
 
 

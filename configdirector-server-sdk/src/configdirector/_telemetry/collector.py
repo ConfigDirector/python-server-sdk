@@ -7,11 +7,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from .._context_kind import effective_kind
 from .._http import HttpClient
 from .._version import SdkIdentity
 from ..types import ConfigDirectorLogger, ConfigType, ConfigValue, Context, EvaluationReason
 from .events import EvaluatedConfigEvent
-from .queue import ContextRegistry, EventQueue, aggregate
+from .queue import ContextRegistry, EventQueue, InvalidContextRecording, InvalidContextSubmissions, aggregate
 from .reporter import EventReport, EventReporter, HttpEventReporter
 
 __all__ = [
@@ -71,6 +72,8 @@ class TelemetryProtocol(Protocol):
         value_id: str | None = None,
     ) -> None: ...
 
+    def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording: ...
+
     def close(self) -> None: ...
 
 
@@ -92,6 +95,8 @@ class TelemetryCollector:
         evaluation_limit = limit * _EVALUATION_SHARE // 10
         self._events = EventQueue(evaluation_limit)
         self._contexts = ContextRegistry(limit - evaluation_limit)
+        self._invalid_contexts = InvalidContextSubmissions()
+        self._invalid_contexts_after_stopping = InvalidContextSubmissions()
 
         self._lock = threading.Lock()
         # Held for the whole of a flush, so that a report triggered by close() cannot overtake
@@ -122,9 +127,11 @@ class TelemetryCollector:
         # An anonymous context still targets rules, but it is not persisted and must not be
         # identifiable in what is reported.
         context_id: str | None = None
+        context_kind: str | None = None
         if context is not None and context.id and not context.anonymous:
             context_id = context.id
-            self._contexts.add(context_id, context)
+            context_kind = effective_kind(context)
+            self._contexts.add(context_kind, context_id, context)
 
         self._events.push(
             EvaluatedConfigEvent.of(
@@ -134,10 +141,17 @@ class TelemetryCollector:
                 used_default=used_default,
                 reason=reason,
                 context_id=context_id,
+                context_kind=context_kind,
                 config_type=config_type,
                 value_id=value_id,
             )
         )
+
+    def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording:
+        with self._lock:
+            if self._collecting:
+                return self._invalid_contexts.record(kind_sample)
+            return self._invalid_contexts_after_stopping.record(kind_sample)
 
     # Reports everything collected so far without waiting for the next interval, blocking until
     # the request completes. Nothing is sent when there is nothing to report.
@@ -154,6 +168,7 @@ class TelemetryCollector:
                 dropped_evaluations=snapshot.dropped_count,
                 contexts=contexts,
                 dropped_contexts=dropped_contexts,
+                invalid_contexts=self._invalid_contexts.take_snapshot(),
             )
             if report.is_empty:
                 return
@@ -185,6 +200,7 @@ class TelemetryCollector:
             self.flush()
         self._events.clear()
         self._contexts.clear()
+        self._invalid_contexts.clear()
 
     def _run(self) -> None:
         delay = self._initial_flush_delay
@@ -207,6 +223,7 @@ class TelemetryCollector:
         self._stop.set()
         self._events.clear()
         self._contexts.clear()
+        self._invalid_contexts.clear()
         self._logger.warning(
             "[TelemetryCollector] Received a fatal error while reporting telemetry. No longer "
             "collecting events."

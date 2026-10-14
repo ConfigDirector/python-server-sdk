@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .._context_kind import effective_kind
 from ..types import Context, Metadata
 from ._json_pointer import find_by_pointer
 from ._json_value import to_json_string
@@ -54,6 +55,8 @@ def _resolve(condition: AttributeCondition, context: EvaluationContext | None) -
             return _or_absent(_context_of(context).id)
         case "name":
             return _or_absent(_context_of(context).name)
+        case "kind":
+            return effective_kind(_context_of(context))
         case "appName":
             return _or_absent(_metadata_of(context).app_name)
         case "appVersion":

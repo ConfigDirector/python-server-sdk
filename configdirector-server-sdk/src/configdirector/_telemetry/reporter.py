@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
+from .._context_kind import effective_kind
 from .._http import HttpClient
 from .._transport.base import is_fatal_status, request_headers, resolve
 from .._version import SdkIdentity
 from ..errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 from ..types import ConfigDirectorLogger, Context
-from .queue import AggregatedEvent
+from .queue import AggregatedEvent, InvalidContextEntry
 
 __all__ = [
     "REQUEST_TIMEOUT",
@@ -34,12 +35,14 @@ class EventReport:
     dropped_evaluations: int
     contexts: list[Context]
     dropped_contexts: int
+    invalid_contexts: list[InvalidContextEntry] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
         return (
             not self.evaluations
             and not self.contexts
+            and not self.invalid_contexts
             and self.dropped_evaluations == 0
             and self.dropped_contexts == 0
         )
@@ -96,7 +99,8 @@ class HttpEventReporter:
                 "capturedContexts": [_context_to_wire(context) for context in report.contexts]
             },
             "aggregatedEvents": {
-                "evaluatedConfig": [_aggregated_to_wire(event) for event in report.evaluations]
+                "evaluatedConfig": [_aggregated_to_wire(event) for event in report.evaluations],
+                "invalidContext": [_invalid_context_to_wire(entry) for entry in report.invalid_contexts],
             },
             "droppedEvents": {
                 "evaluatedConfig": report.dropped_evaluations,
@@ -148,10 +152,22 @@ def _aggregated_to_wire(aggregated: AggregatedEvent) -> dict[str, Any]:
     }
 
 
+def _invalid_context_to_wire(entry: InvalidContextEntry) -> dict[str, Any]:
+    event: dict[str, Any] = {"reason": "invalid-context-kind"}
+    if entry.kind_sample is not None:
+        event["kindSample"] = entry.kind_sample
+    return {
+        "startTime": _timestamp(entry.start_time),
+        "endTime": _timestamp(entry.end_time),
+        "count": entry.count,
+        "event": event,
+    }
+
+
 def _context_to_wire(context: Context) -> dict[str, Any]:
     # Only identified, non-anonymous contexts are ever captured, so `anonymous` is left out
     # rather than sent as a constant false.
-    wire: dict[str, Any] = {"id": context.id}
+    wire: dict[str, Any] = {"id": context.id, "kind": effective_kind(context)}
     if context.name is not None:
         wire["name"] = context.name
     if context.traits is not None:

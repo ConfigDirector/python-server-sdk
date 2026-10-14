@@ -11,6 +11,7 @@ from typing import Any, Literal, cast, overload
 from urllib.parse import urlparse
 
 from ._bundle import ConfigBundle
+from ._context_kind import is_valid_kind, kind_sample
 from ._evaluation import (
     ConditionalRule,
     Config,
@@ -22,8 +23,10 @@ from ._evaluation import (
 from ._http import HttpClient
 from ._logger import get_default_logger
 from ._telemetry import (
+    KIND_SAMPLE_LIMIT,
     MAX_EVENT_QUEUE_LIMIT,
     MIN_EVENT_QUEUE_LIMIT,
+    InvalidContextRecording,
     TelemetryCollector,
     TelemetryCollectorOptions,
     TelemetryProtocol,
@@ -369,9 +372,10 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         config_key: str,
         definition: Config | None,
         default: ConfigValueT,
-        context: Context | None,
+        supplied_context: Context | None,
         segments: Segments,
     ) -> ConfigValueT:
+        context = self._context_to_evaluate(supplied_context)
         if definition is None:
             reason: EvaluationReason = "config-state-missing" if self.is_ready else "client-not-ready"
             self._logger.debug(
@@ -409,6 +413,32 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         self._emit_evaluation(config_key, result.value, result.used_default, result.reason, value_id, context)
         return cast(ConfigValueT, result.value)
 
+    def _context_to_evaluate(self, supplied_context: Context | None) -> Context | None:
+        if supplied_context is None or supplied_context.kind is None or is_valid_kind(supplied_context.kind):
+            return supplied_context
+        sample = kind_sample(supplied_context.kind)
+        self._log_invalid_context(self._telemetry.record_invalid_context(sample), sample)
+        return None
+
+    def _log_invalid_context(self, recording: InvalidContextRecording, sample: str) -> None:
+        match recording:
+            case "new-kind-sample":
+                self._logger.error(
+                    "Ignored a context with the invalid kind '%s' and evaluated as if no context was "
+                    "supplied. A context kind has 1 to 64 characters, using only lowercase letters, "
+                    "digits, '-' and '_'.",
+                    sample,
+                )
+            case "first-beyond-sample-limit":
+                self._logger.error(
+                    "Ignored a context with another invalid kind and evaluated as if no context was "
+                    "supplied. %d different invalid kinds were logged recently, so further invalid "
+                    "kinds are not logged individually.",
+                    KIND_SAMPLE_LIMIT,
+                )
+            case "known-kind-sample" | "beyond-sample-limit":
+                pass
+
     def _emit_evaluation(
         self,
         config_key: str,
@@ -437,6 +467,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         context: Context | None = None,
         config_keys: Sequence[str] | None = None,
     ) -> dict[str, ConfigState]:
+        context_to_evaluate = self._context_to_evaluate(context)
         with self._lock:
             if not self._ready or self._configs is None:
                 return {}
@@ -447,7 +478,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
                 definitions = {key: config for key, config in self._configs.items() if key in requested}
             segments = self._segments
 
-        evaluation_context = EvaluationContext(context=context, metadata=self._metadata)
+        evaluation_context = EvaluationContext(context=context_to_evaluate, metadata=self._metadata)
         return {
             key: self._evaluator.evaluate(config, evaluation_context, segments)
             for key, config in definitions.items()

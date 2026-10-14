@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .._context_kind import effective_kind
 from ..types import ConfigDirectorLogger, ConfigState
 from ._json_value import to_json_string
 from .condition_evaluator import evaluate_condition
@@ -99,9 +100,12 @@ class ConfigEvaluator:
         config: Config,
         context: EvaluationContext | None,
     ) -> _RuleResult:
-        identifier = context.context.id if context is not None and context.context is not None else None
+        supplied = context.context if context is not None else None
+        identifier = supplied.id if supplied is not None else None
         assigned = (
-            PERCENTAGE_WITHOUT_IDENTIFIER if identifier is None else assign_percentage(config.id, identifier)
+            PERCENTAGE_WITHOUT_IDENTIFIER
+            if identifier is None
+            else assign_percentage(config.id, identifier, effective_kind(supplied))
         )
 
         bucket: Percentage | None = None

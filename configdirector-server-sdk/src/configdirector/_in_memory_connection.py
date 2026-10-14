@@ -12,7 +12,7 @@ from typing import Any, Literal
 from ._bundle import BundleKind, ConfigBundle
 from ._evaluation import Config, TargetingRules, Variation
 from ._logger import get_default_logger
-from ._telemetry import TelemetryCollectorOptions
+from ._telemetry import InvalidContextRecording, TelemetryCollectorOptions
 from ._transport import TransportOptions
 from ._transport.base import fatal_status_error
 from .client import _ConfigDirectorClient, _validate_config_key
@@ -63,6 +63,9 @@ class _DiscardingTelemetry:
         value_id: str | None = None,
     ) -> None:
         return None
+
+    def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording:
+        return "new-kind-sample"
 
     def close(self) -> None:
         return None

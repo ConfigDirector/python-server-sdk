@@ -21,6 +21,10 @@ from tests.helpers import RecordingLogger, wait_for
 
 PROMPTLY = 5.0
 LONGER_THAN_THE_TEST_WAITS = 30.0
+INVALID_DEVICE_KIND_MESSAGE = (
+    "Ignored a context with the invalid kind 'Device' and evaluated as if no context was supplied. "
+    "A context kind has 1 to 64 characters, using only lowercase letters, digits, '-' and '_'."
+)
 
 
 class ThreadWatch:
@@ -634,6 +638,33 @@ class TestValues:
         assert test_client.client.get_value("ratio", 0) == 0
 
         assert evaluations[-1].evaluation.reason == "invalid-number"
+
+
+class TestContextKinds:
+    def test_serves_a_context_of_any_valid_kind_and_reports_it(
+        self, create: Callable[..., TestClient]
+    ) -> None:
+        client = create({"flag": True}).client
+        evaluations = evaluations_of(client)
+        client.initialize()
+        device = Context(id="42", kind="device")
+
+        assert client.get_value("flag", False, device) is True
+        assert evaluations[-1].evaluation.context == device
+
+    def test_ignores_a_context_with_an_invalid_kind_and_logs_every_read(
+        self, create: Callable[..., TestClient], logger: RecordingLogger
+    ) -> None:
+        client = create({"flag": True}).client
+        evaluations = evaluations_of(client)
+        client.initialize()
+
+        first = client.get_value("flag", False, Context(id="42", kind="Device"))
+        second = client.get_value("flag", False, Context(id="42", kind="Device"))
+
+        assert (first, second) == (True, True)
+        assert [evaluation.evaluation.context for evaluation in evaluations] == [None, None]
+        assert logger.messages("error") == [INVALID_DEVICE_KIND_MESSAGE, INVALID_DEVICE_KIND_MESSAGE]
 
 
 class TestFactory:
