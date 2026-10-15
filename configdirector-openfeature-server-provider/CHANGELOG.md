@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-14
+
 ### Added
 
 - The provider reads a top-level `kind` attribute of the evaluation context, beside the targeting
