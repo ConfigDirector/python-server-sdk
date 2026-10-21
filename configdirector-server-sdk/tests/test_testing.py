@@ -17,7 +17,7 @@ from configdirector import (
     Context,
 )
 from configdirector.testing import TestClient, create_test_client
-from tests.helpers import RecordingLogger, wait_for
+from tests.helpers import RecordingLogger, ThreadWatch, wait_for
 
 PROMPTLY = 5.0
 LONGER_THAN_THE_TEST_WAITS = 30.0
@@ -25,18 +25,6 @@ INVALID_DEVICE_KIND_MESSAGE = (
     "Ignored a context with the invalid kind 'Device' and evaluated as if no context was supplied. "
     "A context kind has 1 to 64 characters, using only lowercase letters, digits, '-' and '_'."
 )
-
-
-class ThreadWatch:
-    def __init__(self) -> None:
-        self._before = set(threading.enumerate())
-
-    def new_sdk_threads(self) -> set[str]:
-        return {
-            thread.name
-            for thread in threading.enumerate()
-            if thread not in self._before and thread.name.startswith("configdirector-")
-        }
 
 
 def start_initialize(client: Any) -> threading.Thread:

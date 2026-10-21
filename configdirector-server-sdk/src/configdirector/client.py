@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from types import TracebackType
 from typing import Any, Literal, cast, overload
-from urllib.parse import urlparse
 
 from ._bundle import ConfigBundle
+from ._connection_plan import Connect, LiveConnectionMode, StayOffline, plan_connection
 from ._context_kind import is_valid_kind, kind_sample
 from ._evaluation import (
     ConditionalRule,
@@ -26,6 +27,7 @@ from ._telemetry import (
     KIND_SAMPLE_LIMIT,
     MAX_EVENT_QUEUE_LIMIT,
     MIN_EVENT_QUEUE_LIMIT,
+    DiscardingTelemetry,
     InvalidContextRecording,
     TelemetryCollector,
     TelemetryCollectorOptions,
@@ -35,10 +37,12 @@ from ._telemetry import (
 from ._transport import (
     DEFAULT_POLLING_INTERVAL,
     MIN_POLLING_INTERVAL,
+    OfflineTransport,
     Transport,
     TransportOptions,
     create_transport,
 )
+from ._validation import validate_config_key
 from ._value_parser import parse_config_value
 from ._version import SERVER_SDK_IDENTITY, SdkIdentity
 from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
@@ -65,8 +69,6 @@ from .types import (
 
 __all__ = ["create_client"]
 
-_DEFAULT_BASE_URL = "https://server-sdk-api.configdirector.com"
-
 _EVENT_NAMES: frozenset[str] = frozenset({"client_ready", "configs_updated", "config_evaluated"})
 
 _VALID_VALUE_TYPES: tuple[type, ...] = (str, int, float, bool, dict, list)
@@ -88,7 +90,8 @@ class _ConfigDirectorClient(ConfigDirectorClient):
 
     Args:
         server_sdk_key: Your ConfigDirector server SDK key. This is a secret value — do not
-            commit it to source control.
+            commit it to source control. Required unless ``connection.mode`` is ``"offline"``,
+            where it can be left out.
         metadata: Metadata about your application. Supplying ``app_name`` and ``app_version`` is
             recommended so that they can be referenced from targeting rules.
         connection: Connection options such as mode, timeout, and polling interval.
@@ -108,13 +111,14 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             collector that reports evaluations to ConfigDirector.
 
     Raises:
-        ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
-            ``connection.url`` is not a valid URL, or if a ``telemetry`` setting is out of range.
+        ConfigDirectorValidationError: If ``connection.mode`` is not a known mode, if
+            ``server_sdk_key`` is missing or empty outside offline mode, if ``connection.url`` is
+            not a valid URL outside offline mode, or if a ``telemetry`` setting is out of range.
     """
 
     def __init__(
         self,
-        server_sdk_key: str,
+        server_sdk_key: str | None,
         *,
         metadata: Metadata | None = None,
         connection: ConnectionOptions | None = None,
@@ -127,21 +131,13 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         telemetry_factory: Callable[[TelemetryCollectorOptions], TelemetryProtocol] | None = None,
     ) -> None:
         self._logger = logger if logger is not None else get_default_logger(log_level)
-        if _is_blank(server_sdk_key):
-            raise ConfigDirectorValidationError(
-                "No server SDK key was provided, the client cannot be instantiated without a "
-                "valid server SDK key"
-            )
-
-        self._server_sdk_key = server_sdk_key
+        self._connection = connection if connection is not None else ConnectionOptions()
+        self._plan = plan_connection(server_sdk_key, self._connection)
         self._sdk_identity = sdk_identity
         self._metadata = metadata if metadata is not None else Metadata()
-        self._connection = connection if connection is not None else ConnectionOptions()
-        self._polling_interval = _resolve_polling_interval(self._connection, self._logger)
         self._telemetry_options = _validated_telemetry(
             telemetry if telemetry is not None else TelemetryOptions()
         )
-        self._base_url = _validated_url(self._connection.url) or _DEFAULT_BASE_URL
 
         # One pool for every request/response call this client makes — polling and telemetry
         # both. Owned here so that close() releases the connections it opened, rather than
@@ -157,19 +153,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         self._ready_event = threading.Event()
         self._evaluator = ConfigEvaluator(self._logger)
         meta_context = _meta_context(self._metadata, self._sdk_identity)
-        build_transport = transport_factory if transport_factory is not None else self._create_transport
-        self._transport = build_transport(
-            TransportOptions(
-                server_sdk_key=server_sdk_key,
-                base_url=self._base_url,
-                meta_context=meta_context,
-                sdk_identity=self._sdk_identity,
-                logger=self._logger,
-                on_bundle=self._on_bundle,
-                http=self._http,
-                polling_interval=self._polling_interval,
-            ),
-        )
+        self._transport = self._build_transport(transport_factory, meta_context)
 
         if hooks is not None:
             for event, handler in (
@@ -182,26 +166,72 @@ class _ConfigDirectorClient(ConfigDirectorClient):
 
         # Built last, and deliberately so: it starts a background flush thread, which would
         # outlive the client if anything above this line raised.
-        build_telemetry = telemetry_factory if telemetry_factory is not None else TelemetryCollector
-        self._telemetry: TelemetryProtocol = build_telemetry(
-            TelemetryCollectorOptions(
-                server_sdk_key=server_sdk_key,
-                base_url=self._base_url,
-                meta_context=meta_context,
-                sdk_identity=self._sdk_identity,
-                logger=self._logger,
-                http=self._http,
-                event_queue_limit=self._telemetry_options.event_queue_limit,
-                flush_interval=self._telemetry_options.flush_interval,
-            )
-        )
+        self._telemetry: TelemetryProtocol = self._build_telemetry(telemetry_factory, meta_context)
 
-    def _create_transport(self, options: TransportOptions) -> Transport:
-        return create_transport(self._connection.mode, options)
+    def _build_transport(
+        self,
+        transport_factory: Callable[[TransportOptions], Transport] | None,
+        meta_context: Mapping[str, str],
+    ) -> Transport:
+        match self._plan:
+            case StayOffline(source=source):
+                return OfflineTransport(source, self._on_bundle)
+            case Connect() as plan:
+                build_transport = (
+                    transport_factory
+                    if transport_factory is not None
+                    else partial(create_transport, plan.mode)
+                )
+                return build_transport(
+                    TransportOptions(
+                        server_sdk_key=plan.server_sdk_key,
+                        base_url=plan.base_url,
+                        meta_context=meta_context,
+                        sdk_identity=self._sdk_identity,
+                        logger=self._logger,
+                        on_bundle=self._on_bundle,
+                        http=self._http,
+                        polling_interval=_resolve_polling_interval(
+                            plan.mode, self._connection.polling_interval, self._logger
+                        ),
+                    ),
+                )
+
+    def _build_telemetry(
+        self,
+        telemetry_factory: Callable[[TelemetryCollectorOptions], TelemetryProtocol] | None,
+        meta_context: Mapping[str, str],
+    ) -> TelemetryProtocol:
+        match self._plan:
+            case StayOffline():
+                return DiscardingTelemetry()
+            case Connect() as plan:
+                build_telemetry = telemetry_factory if telemetry_factory is not None else TelemetryCollector
+                return build_telemetry(
+                    TelemetryCollectorOptions(
+                        server_sdk_key=plan.server_sdk_key,
+                        base_url=plan.base_url,
+                        meta_context=meta_context,
+                        sdk_identity=self._sdk_identity,
+                        logger=self._logger,
+                        http=self._http,
+                        event_queue_limit=self._telemetry_options.event_queue_limit,
+                        flush_interval=self._telemetry_options.flush_interval,
+                    )
+                )
 
     # -- lifecycle --------------------------------------------------------------------
 
     def initialize(self, timeout: float | None = None) -> None:
+        match self._plan:
+            case StayOffline():
+                self._raise_if_closed()
+                self._logger.debug("Initializing in 'offline' mode")
+                self._transport.connect(self._connection.timeout)
+            case Connect() as plan:
+                self._connect_and_wait(plan, timeout)
+
+    def _connect_and_wait(self, plan: Connect, timeout: float | None) -> None:
         effective_timeout = timeout if timeout is not None else self._connection.timeout
         if effective_timeout <= 0:
             raise ConfigDirectorValidationError(
@@ -211,8 +241,8 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         self._raise_if_closed()
         self._logger.debug(
             "Initializing in %r mode against %s with a %ss timeout",
-            self._connection.mode,
-            self._base_url,
+            plan.mode,
+            plan.base_url,
             effective_timeout,
         )
 
@@ -231,7 +261,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             details = (
                 "The client will continue to retry since there were no fatal errors detected. "
                 "Configs will return the default value until the connection succeeds."
-                if self._connection.mode == "streaming"
+                if plan.mode == "streaming"
                 else "Since the client was configured without streaming, configs may not update "
                 "and will always return the default value."
             )
@@ -358,7 +388,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         default: ConfigValueT,
         context: Context | None = None,
     ) -> ConfigValueT:
-        _validate_config_key(config_key)
+        validate_config_key(config_key)
         _validate_default(default)
 
         with self._lock:
@@ -493,7 +523,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         callback: WatchHandler[ConfigValueT],
         context: Context | None = None,
     ) -> Subscription:
-        _validate_config_key(config_key)
+        validate_config_key(config_key)
         _validate_default(default)
         if not callable(callback):
             raise ConfigDirectorTypeError(
@@ -611,7 +641,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
 
 
 def create_client(
-    server_sdk_key: str,
+    server_sdk_key: str | None = None,
     *,
     metadata: Metadata | None = None,
     connection: ConnectionOptions | None = None,
@@ -628,7 +658,8 @@ def create_client(
 
     Args:
         server_sdk_key: Your ConfigDirector server SDK key. This is a secret value — do not
-            commit it to source control.
+            commit it to source control. Required unless ``connection.mode`` is ``"offline"``,
+            where it can be left out.
         metadata: Metadata about your application. Supplying ``app_name`` and ``app_version`` is
             recommended so that they can be referenced from targeting rules.
         connection: Connection options such as mode, timeout, and polling interval.
@@ -644,8 +675,9 @@ def create_client(
         hooks: Event handlers to attach before the client can emit any event.
 
     Raises:
-        ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty, if
-            ``connection.url`` is not a valid URL, or if a ``telemetry`` setting is out of range.
+        ConfigDirectorValidationError: If ``connection.mode`` is not a known mode, if
+            ``server_sdk_key`` is missing or empty outside offline mode, if ``connection.url`` is
+            not a valid URL outside offline mode, or if a ``telemetry`` setting is out of range.
     """
     return _ConfigDirectorClient(
         server_sdk_key,
@@ -676,20 +708,6 @@ def _uses_any_segment(definition: Config, segments: Segments) -> bool:
         if isinstance(rule, ConditionalRule)
         for condition in rule.conditions
     )
-
-
-def _is_blank(value: object) -> bool:
-    """Whether ``value`` is anything other than a string with non-whitespace content.
-
-    Takes ``object`` rather than ``str`` on purpose: callers without a type checker can pass
-    anything at all, and the SDK should reject it with a clear error instead of an AttributeError.
-    """
-    return not isinstance(value, str) or not value.strip()
-
-
-def _validate_config_key(config_key: str) -> None:
-    if _is_blank(config_key):
-        raise ConfigDirectorValidationError("Invalid config key. The config key must be a non-empty string.")
 
 
 def _validate_default(default: ConfigValue) -> None:
@@ -727,12 +745,13 @@ def _validated_telemetry(options: TelemetryOptions) -> TelemetryOptions:
     return options
 
 
-def _resolve_polling_interval(connection: ConnectionOptions, logger: ConfigDirectorLogger) -> float:
-    configured_interval = connection.polling_interval
+def _resolve_polling_interval(
+    mode: LiveConnectionMode, configured_interval: float | None, logger: ConfigDirectorLogger
+) -> float:
     if configured_interval is None:
         return DEFAULT_POLLING_INTERVAL
 
-    if connection.mode != "polling" or configured_interval >= MIN_POLLING_INTERVAL:
+    if mode != "polling" or configured_interval >= MIN_POLLING_INTERVAL:
         return configured_interval
 
     logger.warning(
@@ -742,15 +761,3 @@ def _resolve_polling_interval(connection: ConnectionOptions, logger: ConfigDirec
         MIN_POLLING_INTERVAL,
     )
     return MIN_POLLING_INTERVAL
-
-
-def _validated_url(url: str | None) -> str | None:
-    if url is None:
-        return None
-
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.netloc:
-        raise ConfigDirectorValidationError(
-            f"Invalid base URL '{url}'. The URL must include a scheme and a host."
-        )
-    return url

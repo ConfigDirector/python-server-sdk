@@ -10,6 +10,7 @@ from .collector import (
     TelemetryProtocol,
 )
 from .compact_json import to_compact_json
+from .discarding import DiscardingTelemetry
 from .events import (
     CONFIG_VALUE_MAX_LENGTH,
     EvaluatedConfigEvent,
@@ -42,6 +43,7 @@ __all__ = [
     "VALUE_ID_LENGTH",
     "AggregatedEvent",
     "ContextRegistry",
+    "DiscardingTelemetry",
     "EvaluatedConfigEvent",
     "EventQueue",
     "EventQueueSnapshot",

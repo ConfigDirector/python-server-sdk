@@ -13,8 +13,8 @@ from configdirector import (
     __version__,
     create_client,
 )
-from configdirector.client import _DEFAULT_BASE_URL
-from tests.helpers import ClientBuilder
+from configdirector._connection_plan import _DEFAULT_BASE_URL
+from tests.helpers import ClientBuilder, TransportRecorder
 
 SDK_KEY = "test-server-sdk-key"
 
@@ -59,6 +59,21 @@ def test_rejects_a_blank_sdk_key(build: ClientBuilder, sdk_key: str) -> None:
         build(sdk_key)
 
 
+def test_rejects_a_missing_sdk_key_outside_offline_mode(build: ClientBuilder) -> None:
+    with pytest.raises(ConfigDirectorValidationError, match="server SDK key"):
+        build(None)
+
+
+def test_create_client_without_an_sdk_key_rejects_it_outside_offline_mode() -> None:
+    with pytest.raises(ConfigDirectorValidationError, match="server SDK key"):
+        create_client()
+
+
+def test_rejects_an_unknown_connection_mode(build: ClientBuilder) -> None:
+    with pytest.raises(ConfigDirectorValidationError):
+        build(SDK_KEY, connection=ConnectionOptions(mode="stream"))  # type: ignore[arg-type]
+
+
 def test_validation_errors_are_also_value_errors(build: ClientBuilder) -> None:
     with pytest.raises(ValueError, match="server SDK key"):
         build("")
@@ -67,14 +82,16 @@ def test_validation_errors_are_also_value_errors(build: ClientBuilder) -> None:
         build("")
 
 
-def test_defaults_to_the_production_url(build: ClientBuilder) -> None:
-    assert build(SDK_KEY)._base_url == _DEFAULT_BASE_URL
+def test_defaults_to_the_production_url(build: ClientBuilder, transports: TransportRecorder) -> None:
+    build(SDK_KEY)
+
+    assert transports.last.options.base_url == _DEFAULT_BASE_URL
 
 
-def test_accepts_a_custom_url(build: ClientBuilder) -> None:
-    client = build(SDK_KEY, connection=ConnectionOptions(url="https://proxy.example.com"))
+def test_accepts_a_custom_url(build: ClientBuilder, transports: TransportRecorder) -> None:
+    build(SDK_KEY, connection=ConnectionOptions(url="https://proxy.example.com"))
 
-    assert client._base_url == "https://proxy.example.com"
+    assert transports.last.options.base_url == "https://proxy.example.com"
 
 
 @pytest.mark.parametrize("url", ["not-a-url", "://missing-scheme", "https://"])

@@ -42,4 +42,4 @@ class ConfigDirectorTypeError(ConfigDirectorError, TypeError):
 
 
 class ConfigDirectorInitializationError(ConfigDirectorError):
-    """Raised when the client cannot be initialized."""
+    """Raised when the client cannot be initialized, such as when the offline values cannot be loaded."""

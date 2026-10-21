@@ -8,6 +8,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Offline mode: `ConnectionOptions(mode="offline")` runs the client without connecting to
+  ConfigDirector, for example in UI tests that pin every flag to a known value. Give the values in
+  a JSON file with `file`, a `str` or `os.PathLike` resolved against the working directory, or
+  inline with `values`; with neither, every config returns its in-code default value. An offline
+  client needs no server SDK key, opens no connection, starts no thread and sends no telemetry, so
+  the application does not appear in the dashboard. `initialize()` makes it ready at once, fires
+  `client_ready` once, and serves each value to every context with the reason `found-match`; a
+  watch registered before `initialize()` is called with its offline value. `polling_interval`,
+  `timeout`, `url` and the `timeout` argument of `initialize()` are not used. Calling
+  `initialize()` again loads the values again, reading the file again, and calls watches again.
+- `initialize()` raises `ConfigDirectorInitializationError` when the offline values cannot be
+  loaded: the file is missing, cannot be read, is not valid JSON or does not hold a JSON object; a
+  value is `None` or another value a config cannot hold; `file` and `values` are both given; or
+  either is given in `streaming` or `polling` mode. The client stays not ready, or, when an
+  earlier `initialize()` loaded values, keeps serving those.
+
+### Changed
+
+- The `server_sdk_key` of `create_client` is optional and can be left out in offline mode. Outside
+  offline mode a missing or blank key still raises `ConfigDirectorValidationError`, which
+  `create_client()` called with no arguments now raises instead of a `TypeError`.
+- An unknown connection mode, such as `"stream"`, raises `ConfigDirectorValidationError` from
+  `create_client` instead of streaming.
+- The test client's errors for a value it cannot serve say "Invalid value" instead of "Invalid
+  test value", and the error for `None` no longer suggests `remove_value`. The exception types are
+  unchanged.
+
 ## [1.7.0] - 2026-10-14
 
 ### Added

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import os
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any, Literal, Protocol, TypeVar, overload, runtime_checkable
@@ -51,8 +52,9 @@ ConfigValue = str | int | float | bool | dict[str, Any] | list[Any]
 
 ConfigValueT = TypeVar("ConfigValueT", bound=ConfigValue)
 
-ConnectionMode = Literal["streaming", "polling"]
-"""How the SDK retrieves config state from ConfigDirector."""
+ConnectionMode = Literal["streaming", "polling", "offline"]
+"""How the SDK retrieves config state from ConfigDirector, or ``"offline"`` to serve the values the
+application gives it without connecting."""
 
 EvaluationReason = Literal[
     "found-match",
@@ -166,28 +168,50 @@ class ConnectionOptions:
     """Options controlling how the client connects to ConfigDirector.
 
     Attributes:
-        mode: The connection mode, one of ``"streaming"`` (default) or ``"polling"``.
+        mode: The connection mode, one of ``"streaming"`` (default), ``"polling"`` or
+            ``"offline"``.
 
             With ``"streaming"``, the connection stays open and receives updates whenever
             config state changes in the ConfigDirector dashboard.
 
             With ``"polling"``, config state is retrieved once during initialization and then
             re-fetched every ``polling_interval``.
+
+            With ``"offline"``, the client never connects to ConfigDirector and sends nothing.
+            It needs no server SDK key, and serves the values given in ``file`` or ``values``
+            to every context. With neither, every config returns its in-code default value.
         polling_interval: The polling interval **in seconds**, used only when ``mode`` is
             ``"polling"``. Defaults to 5 minutes (300 seconds) when omitted. The minimum is 60
             seconds. A value below the minimum is raised to the minimum and a warning is logged.
         timeout: The timeout **in seconds** applied to initialization. When streaming is
             enabled, initialization may still succeed after the timeout elapses as long as no
             unrecoverable error (such as an invalid SDK key) is encountered. When streaming is
-            disabled, a timed-out initialization is not retried. Defaults to 3 seconds.
+            disabled, a timed-out initialization is not retried. Defaults to 3 seconds. Not used
+            when ``mode`` is ``"offline"``.
         url: The base URL of the ConfigDirector SDK server. Only needed when routing through a
-            proxy; refer to the docs on configuring a proxy for the server SDK.
+            proxy; refer to the docs on configuring a proxy for the server SDK. Not used when
+            ``mode`` is ``"offline"``.
+        file: The path of a JSON file holding the values to serve when ``mode`` is
+            ``"offline"``, as one JSON object with one value per config key, such as
+            ``{"new-checkout": true, "max-items": 20}``. A relative path is resolved against the
+            working directory. The file is read when :meth:`ConfigDirectorClient.initialize`
+            is called.
+        values: The values to serve when ``mode`` is ``"offline"``, keyed by config key. The
+            config type follows from each value's type: a ``bool``; an ``int`` (an integer
+            config); a ``float`` (a float config); a ``str``; or a ``dict`` with ``str`` keys or a
+            ``list`` (a JSON config). The values of a ``file`` follow the same rule once read.
+
+            Only one of ``file`` and ``values`` can be given, and only when ``mode`` is
+            ``"offline"``; otherwise :meth:`ConfigDirectorClient.initialize` raises
+            :class:`~configdirector.ConfigDirectorInitializationError`.
     """
 
     mode: ConnectionMode = "streaming"
     polling_interval: float | None = None
     timeout: float = 3.0
     url: str | None = None
+    file: str | os.PathLike[str] | None = None
+    values: Mapping[str, ConfigValue] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,13 +392,23 @@ class ConfigDirectorClient(Protocol):
         This does not raise on connection failure — check :attr:`is_ready` to find out whether
         config state was actually received.
 
+        When the connection mode is ``"offline"``, this connects to nothing: it loads the offline
+        values, makes the client ready and returns at once, and ``timeout`` is not used. Calling
+        it again loads the values again, reading the file again when they come from a file.
+
         Args:
             timeout: Seconds to wait, overriding
                 :attr:`~configdirector.types.ConnectionOptions.timeout` for this call.
 
         Raises:
-            ConfigDirectorValidationError: If ``timeout`` is not positive, or the client is
-                closed.
+            ConfigDirectorValidationError: If ``timeout`` is not positive outside offline mode, or
+                the client is closed.
+            ConfigDirectorInitializationError: If the offline values cannot be loaded: the file is
+                missing, cannot be read, is not valid JSON or does not hold a JSON object; a value
+                is ``None`` or another value a config cannot hold; ``file`` and ``values`` are both
+                given; or either is given when the connection mode is ``"streaming"`` or
+                ``"polling"``. The client stays not ready, or keeps serving the values an earlier
+                call loaded.
         """
         ...
 
@@ -382,7 +416,8 @@ class ConfigDirectorClient(Protocol):
     def is_ready(self) -> bool:
         """Whether the client is ready following a call to :meth:`initialize`.
 
-        Ready means the connection to the server succeeded and config definitions were received.
+        Ready means the connection to the server succeeded and config definitions were received,
+        or, in offline mode, that the offline values were loaded.
         """
         ...
 

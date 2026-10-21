@@ -1,30 +1,25 @@
 from __future__ import annotations
 
-import json
-import math
 import threading
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal
-from typing import Any, Literal
+from typing import Literal
 
 from ._bundle import BundleKind, ConfigBundle
-from ._evaluation import Config, TargetingRules, Variation
+from ._evaluation import Config
 from ._logger import get_default_logger
-from ._telemetry import InvalidContextRecording, TelemetryCollectorOptions
+from ._native_values import unconditional_config
+from ._telemetry import DiscardingTelemetry, TelemetryCollectorOptions
 from ._transport import TransportOptions
 from ._transport.base import fatal_status_error
-from .client import _ConfigDirectorClient, _validate_config_key
-from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
+from ._validation import validate_config_key
+from .client import _ConfigDirectorClient
 from .types import (
     ConfigDirectorClient,
     ConfigDirectorLogger,
-    ConfigType,
     ConfigValue,
     ConnectionOptions,
-    Context,
-    EvaluationReason,
 )
 
 __all__ = ["InMemoryConnection"]
@@ -49,28 +44,6 @@ class _HeldAttempt:
             self.settled.set()
 
 
-class _DiscardingTelemetry:
-    def record_evaluation(
-        self,
-        *,
-        key: str,
-        default: ConfigValue,
-        value: ConfigValue,
-        used_default: bool,
-        reason: EvaluationReason,
-        context: Context | None = None,
-        config_type: ConfigType | None = None,
-        value_id: str | None = None,
-    ) -> None:
-        return None
-
-    def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording:
-        return "new-kind-sample"
-
-    def close(self) -> None:
-        return None
-
-
 class InMemoryConnection:
     def __init__(
         self,
@@ -80,7 +53,7 @@ class InMemoryConnection:
     ) -> None:
         self._logger = logger if logger is not None else get_default_logger()
         self._state_lock = threading.Lock()
-        self._configs = _encode_all(values)
+        self._configs = _test_configs(values)
         self._armed: _Armed | None = None
         self._held: _HeldAttempt | None = None
         self._connected = False
@@ -103,23 +76,23 @@ class InMemoryConnection:
             return self._held is not None
 
     def set_value(self, key: str, value: ConfigValue) -> None:
-        definition = _encode(key, value)
+        definition = _test_config(key, value)
         with self._state_lock:
             self._configs[key] = definition
             update = self._delta_update(key, definition) if self._connected else None
         self._deliver_if_any(update)
 
     def remove_value(self, key: str) -> None:
-        _validate_config_key(key)
+        validate_config_key(key)
         with self._state_lock:
             self._configs.pop(key, None)
             update = self._full_update() if self._connected else None
         self._deliver_if_any(update)
 
     def replace_values(self, values: Mapping[str, ConfigValue]) -> None:
-        encoded = _encode_all(values)
+        configs = _test_configs(values)
         with self._state_lock:
-            self._configs = encoded
+            self._configs = configs
             self._armed = None
             update = self._full_update() if self._connected else None
         self._deliver_if_any(update)
@@ -244,104 +217,19 @@ class _Attempts:
         self._connection._close_transport()
 
 
-def _discarding_telemetry(options: TelemetryCollectorOptions) -> _DiscardingTelemetry:
-    return _DiscardingTelemetry()
+def _discarding_telemetry(options: TelemetryCollectorOptions) -> DiscardingTelemetry:
+    return DiscardingTelemetry()
 
 
 def _bundle(configs: dict[str, Config], kind: BundleKind) -> ConfigBundle:
     return ConfigBundle(configs=configs, kind=kind, environment_id=_ENVIRONMENT_ID, project_id=_PROJECT_ID)
 
 
-def _encode_all(values: Mapping[str, ConfigValue] | None) -> dict[str, Config]:
+def _test_configs(values: Mapping[str, ConfigValue] | None) -> dict[str, Config]:
     if values is None:
         return {}
-    return {key: _encode(key, value) for key, value in values.items()}
+    return {key: _test_config(key, value) for key, value in values.items()}
 
 
-def _encode(key: str, value: ConfigValue) -> Config:
-    _validate_config_key(key)
-    if value is None:
-        raise ConfigDirectorTypeError(
-            f"Invalid test value for {key!r}: None is not a value. Use remove_value to remove a value."
-        )
-    if isinstance(value, bool):
-        return _definition(key, "boolean", "true" if value else "false")
-    if isinstance(value, int):
-        return _definition(key, "integer", _integer_text(key, value))
-    if isinstance(value, float):
-        return _definition(key, "float", _plain_decimal(key, value))
-    if isinstance(value, str):
-        return _definition(key, "string", value)
-    if isinstance(value, (dict, list)):
-        return _definition(key, "json", _json_text(key, value))
-    raise ConfigDirectorTypeError(
-        f"Invalid test value for {key!r} of type {type(value).__name__!r}. A test value must be a bool, "
-        f"an int, a float, a str, a dict with str keys, or a list."
-    )
-
-
-def _definition(key: str, config_type: ConfigType, text: str) -> Config:
-    return Config(
-        id=f"test-config:{key}",
-        key=key,
-        type=config_type,
-        target=TargetingRules(default_value=text, default_value_id=f"test-value:{key}"),
-        variations=[Variation(value=text)],
-    )
-
-
-def _integer_text(key: str, value: int) -> str:
-    try:
-        return str(value)
-    except ValueError as error:
-        raise ConfigDirectorValidationError(
-            f"Invalid test value for {key!r}: the integer has too many digits to be written out ({error})."
-        ) from error
-
-
-def _plain_decimal(key: str, value: float) -> str:
-    if not math.isfinite(value):
-        raise ConfigDirectorValidationError(
-            f"Invalid test value for {key!r}: {value!r} is not a finite number."
-        )
-    return format(Decimal(repr(value)).normalize(), "f")
-
-
-def _json_text(key: str, value: dict[str, Any] | list[Any]) -> str:
-    _validate_json_contents(key, value, "")
-    try:
-        return json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    except ValueError as error:
-        raise ConfigDirectorValidationError(f"Invalid test value for {key!r}: {error}.") from error
-
-
-def _validate_json_contents(key: str, value: object, path: str) -> None:
-    if value is None or isinstance(value, (bool, int, str)):
-        return
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ConfigDirectorValidationError(
-                f"Invalid test value for {key!r}{_at(path)}: {value!r} is not a finite number."
-            )
-        return
-    if isinstance(value, list):
-        for index, item in enumerate(value):
-            _validate_json_contents(key, item, f"{path}[{index}]")
-        return
-    if isinstance(value, dict):
-        for member_key, member in value.items():
-            if not isinstance(member_key, str):
-                raise ConfigDirectorTypeError(
-                    f"Invalid test value for {key!r}{_at(path)}: the key {member_key!r} is not a str."
-                )
-            _validate_json_contents(key, member, f"{path}.{member_key}" if path else member_key)
-        return
-    raise ConfigDirectorTypeError(
-        f"Invalid test value for {key!r}{_at(path)}: a value of type {type(value).__name__!r} cannot be "
-        f"encoded as JSON. JSON contents can hold bools, ints, finite floats, strs, None, lists, and dicts "
-        f"with str keys."
-    )
-
-
-def _at(path: str) -> str:
-    return f" at {path!r}" if path else ""
+def _test_config(key: str, value: ConfigValue) -> Config:
+    return unconditional_config(key, value, config_id=f"test-config:{key}", value_id=f"test-value:{key}")

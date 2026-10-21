@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -39,6 +40,18 @@ def wait_for(predicate: Callable[[], bool], *, timeout: float = WAIT_TIMEOUT) ->
             return True
         time.sleep(0.002)
     return predicate()
+
+
+class ThreadWatch:
+    def __init__(self) -> None:
+        self._before = set(threading.enumerate())
+
+    def new_sdk_threads(self) -> set[str]:
+        return {
+            thread.name
+            for thread in threading.enumerate()
+            if thread not in self._before and thread.name.startswith("configdirector-")
+        }
 
 
 class StubbedLogger:
@@ -231,7 +244,7 @@ ClientBuilder = Callable[..., _ConfigDirectorClient]
 
 
 def client_builder(transports: TransportRecorder, telemetry: TelemetryRecorder) -> ClientBuilder:
-    def build(server_sdk_key: str, **options: Any) -> _ConfigDirectorClient:
+    def build(server_sdk_key: str | None, **options: Any) -> _ConfigDirectorClient:
         return _ConfigDirectorClient(
             server_sdk_key, transport_factory=transports, telemetry_factory=telemetry, **options
         )
