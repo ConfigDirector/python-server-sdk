@@ -12,7 +12,7 @@ IMPORT_$(PROVIDER) := configdirector_openfeature
 # Sample groups whose package resolves on PyPI, which is what `make samples` installs from. Add a
 # group here once the first release of its package is published; until then only
 # `make samples-local` can check it.
-RELEASED_SAMPLE_GROUPS := $(SDK)
+RELEASED_SAMPLE_GROUPS := $(SDK) $(PROVIDER)
 
 install:
 	uv sync --all-packages
