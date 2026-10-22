@@ -67,9 +67,14 @@ class ConfigDirectorProvider(AbstractProvider):
     ``PROVIDER_NOT_READY``. The provider keeps connecting, and emits ``PROVIDER_READY`` once
     config state arrives.
 
+    In offline mode, ``connection=ConnectionOptions(mode="offline")``, the provider never connects
+    to ConfigDirector and needs no server SDK key. It serves the values of a JSON file or of an
+    inline mapping to every evaluation, as :class:`~configdirector.ConnectionOptions` describes.
+
     Args:
         server_sdk_key: Your ConfigDirector server SDK key. This is a secret value — do not
-            commit it to source control.
+            commit it to source control. Required unless ``connection.mode`` is ``"offline"``,
+            where it can be left out.
         metadata: Metadata about your application. Supplying ``app_name`` and ``app_version`` is
             recommended so that they can be referenced from targeting rules.
         connection: Connection options such as mode, timeout, and polling interval.
@@ -81,13 +86,13 @@ class ConfigDirectorProvider(AbstractProvider):
         telemetry: Telemetry queue and flush tuning.
 
     Raises:
-        configdirector.ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty,
-            or if a ``connection`` or ``telemetry`` setting is invalid.
+        configdirector.ConfigDirectorValidationError: If ``server_sdk_key`` is missing or empty
+            outside offline mode, or if a ``connection`` or ``telemetry`` setting is invalid.
     """
 
     def __init__(
         self,
-        server_sdk_key: str,
+        server_sdk_key: str | None = None,
         *,
         metadata: Metadata | None = None,
         connection: ConnectionOptions | None = None,
@@ -118,7 +123,15 @@ class ConfigDirectorProvider(AbstractProvider):
         return ProviderMetadata(name=_NAME)
 
     def initialize(self, evaluation_context: EvaluationContext) -> None:
-        """Connects to ConfigDirector, waiting up to the configured timeout for config state."""
+        """Connects to ConfigDirector, waiting up to the configured timeout for config state.
+
+        In offline mode, loads the offline values instead.
+
+        Raises:
+            configdirector.ConfigDirectorInitializationError: If the offline values cannot be
+                loaded, ``file`` and ``values`` are both given, or either is given when the
+                connection mode is ``"streaming"`` or ``"polling"``.
+        """
         self._client.initialize()
         with self._lock:
             self._initialized = True

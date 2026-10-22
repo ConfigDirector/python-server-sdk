@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-22
+
+### Added
+
+- Offline mode, through the SDK's `ConnectionOptions(mode="offline")`: the provider never connects
+  to ConfigDirector and serves the values of a JSON file given with `file`, or of a mapping given
+  inline with `values`, to every evaluation, sending nothing. An offline provider needs no server
+  SDK key, so
+  `ConfigDirectorProvider(connection=ConnectionOptions(mode="offline", values={"new-checkout": True}))`
+  takes the options alone. If the offline values cannot be loaded, `file` and `values` are both
+  given, or either is given in `streaming` or `polling` mode, the provider's `initialize` raises
+  `ConfigDirectorInitializationError`, which `set_provider_and_wait` raises in turn, and
+  OpenFeature leaves the provider in the error state. Requires `configdirector-server-sdk` 1.8.0
+  or later, which adds offline mode.
+
+### Changed
+
+- The `server_sdk_key` of `ConfigDirectorProvider` is optional and can be left out in offline
+  mode. Outside offline mode a missing or blank key still raises `ConfigDirectorValidationError`,
+  which `ConfigDirectorProvider()` called with no arguments now raises instead of a `TypeError`.
+- An unknown connection mode, such as `"stream"`, raises `ConfigDirectorValidationError` when the
+  provider is created instead of streaming.
+
 ## [1.5.0] - 2026-10-14
 
 ### Added

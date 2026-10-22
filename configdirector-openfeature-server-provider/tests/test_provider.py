@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextlib
+from pathlib import Path
 from typing import Any
 
 import pytest
-from configdirector import ConfigDirectorValidationError, Metadata
+from configdirector import ConfigDirectorInitializationError, ConfigDirectorValidationError, Metadata
 from openfeature import api
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.event import EventDetails, ProviderEvent
@@ -12,7 +14,7 @@ from openfeature.flag_evaluation import Reason
 from openfeature.provider import ProviderStatus
 
 from configdirector_openfeature import ConfigDirectorProvider, __version__
-from tests.conftest import ProviderFactory, ServerFactory
+from tests.conftest import OfflineProviderFactory, ProviderFactory, ServerFactory
 from tests.helpers import (
     POLLING_PATH,
     TELEMETRY_PATH,
@@ -98,6 +100,10 @@ class TestConstruction:
     def test_rejects_a_blank_sdk_key(self) -> None:
         with pytest.raises(ConfigDirectorValidationError):
             ConfigDirectorProvider(" ")
+
+    def test_requires_a_server_sdk_key_outside_offline_mode(self) -> None:
+        with pytest.raises(ConfigDirectorValidationError):
+            ConfigDirectorProvider()
 
 
 class TestResolution:
@@ -321,3 +327,32 @@ class TestLifecycle:
         provider.shutdown()
 
         assert provider._client.closed is True
+
+
+class TestOfflineMode:
+    def test_resolves_the_offline_values_without_a_server_sdk_key(
+        self, provide_offline: OfflineProviderFactory
+    ) -> None:
+        set_provider_and_wait(provide_offline(values={"enabled": True}))
+
+        details = api.get_client().get_boolean_details("enabled", False)
+
+        assert (details.value, details.error_code) == (True, None)
+
+    def test_fails_to_initialize_when_the_offline_values_cannot_be_loaded(
+        self, provide_offline: OfflineProviderFactory, tmp_path: Path
+    ) -> None:
+        provider = provide_offline(file=str(tmp_path / "missing.json"))
+
+        with pytest.raises(ConfigDirectorInitializationError):
+            provider.initialize(EvaluationContext())
+
+    def test_is_left_in_the_error_state_when_the_offline_values_cannot_be_loaded(
+        self, provide_offline: OfflineProviderFactory, tmp_path: Path
+    ) -> None:
+        provider = provide_offline(file=str(tmp_path / "missing.json"))
+
+        with contextlib.suppress(ConfigDirectorInitializationError):
+            set_provider_and_wait(provider)
+
+        assert api.get_client().get_provider_status() == ProviderStatus.ERROR

@@ -43,7 +43,7 @@ class Wrapper(Enum):
 
 def create_wrapped_client(
     wrapper: Wrapper,
-    server_sdk_key: str,
+    server_sdk_key: str | None,
     *,
     metadata: Metadata | None = None,
     connection: ConnectionOptions | None = None,

@@ -12,6 +12,7 @@ from tests.helpers import FakeConfigDirectorServer
 
 ServerFactory = Callable[..., FakeConfigDirectorServer]
 ProviderFactory = Callable[..., ConfigDirectorProvider]
+OfflineProviderFactory = Callable[..., ConfigDirectorProvider]
 
 
 @pytest.fixture
@@ -40,6 +41,21 @@ def provide() -> Iterator[ProviderFactory]:
             connection=ConnectionOptions(mode=mode, url=server.url, timeout=timeout),  # type: ignore[arg-type]
             **options,
         )
+        providers.append(provider)
+        return provider
+
+    yield create
+    api.clear_providers()
+    for provider in providers:
+        provider.shutdown()
+
+
+@pytest.fixture
+def provide_offline() -> Iterator[OfflineProviderFactory]:
+    providers: list[ConfigDirectorProvider] = []
+
+    def create(**source: Any) -> ConfigDirectorProvider:
+        provider = ConfigDirectorProvider(connection=ConnectionOptions(mode="offline", **source))
         providers.append(provider)
         return provider
 
