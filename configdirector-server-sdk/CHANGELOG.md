@@ -8,6 +8,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- `get_value(key, {})` now returns the config's value only when the config holds a JSON object,
+  and `get_value(key, [])` only when it holds a JSON list. Any other value, such as `42`,
+  `"text"`, `true` or `null`, gives the in-code default value with the reason `invalid-json`, as
+  malformed JSON does. Before, that value came back with `found-match`, although the type of the
+  in-code default value decides how a config is read. These reads are reported to ConfigDirector
+  with that reason, so the dashboard shows the Config type mismatch alert for the config, as it
+  does for other mismatches.
+
 ## [1.8.0] - 2026-10-22
 
 ### Added

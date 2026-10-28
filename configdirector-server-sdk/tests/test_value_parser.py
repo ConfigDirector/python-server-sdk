@@ -142,6 +142,35 @@ class TestJson:
         assert result.value == {"a": 1}
         assert result.reason == "invalid-json"
 
+    def test_a_dict_default_against_a_json_number_falls_back(self) -> None:
+        result = parse_config_value(state("42", type="json"), {"a": 1})
+
+        assert result.value == {"a": 1}
+        assert result.used_default is True
+        assert result.reason == "invalid-json"
+        assert result.value_id is None
+
+    def test_a_dict_default_against_json_null_falls_back(self) -> None:
+        result = parse_config_value(state("null", type="json"), {"a": 1})
+
+        assert result.value == {"a": 1}
+        assert result.used_default is True
+        assert result.reason == "invalid-json"
+
+    def test_a_dict_default_against_a_json_list_falls_back(self) -> None:
+        result = parse_config_value(state("[1,2]", type="json"), {"a": 1})
+
+        assert result.value == {"a": 1}
+        assert result.used_default is True
+        assert result.reason == "invalid-json"
+
+    def test_a_list_default_against_a_json_object_falls_back(self) -> None:
+        result = parse_config_value(state('{"a":1}', type="json"), [1])
+
+        assert result.value == [1]
+        assert result.used_default is True
+        assert result.reason == "invalid-json"
+
 
 class TestValueId:
     def test_a_matched_value_carries_its_value_id(self) -> None:

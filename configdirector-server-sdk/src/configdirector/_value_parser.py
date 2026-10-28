@@ -57,10 +57,14 @@ def parse_config_value(state: ConfigState, default: ConfigValue) -> ParseResult:
         return _matched(parsed_float, state)
 
     # A dict or a list: the config holds JSON.
+    required_shape = dict if isinstance(default, dict) else list
     try:
-        return _matched(json.loads(raw), state)
+        parsed = json.loads(raw)
     except ValueError:
         return ParseResult(value=default, reason="invalid-json", used_default=True)
+    if not isinstance(parsed, required_shape):
+        return ParseResult(value=default, reason="invalid-json", used_default=True)
+    return _matched(parsed, state)
 
 
 def _matched(value: ConfigValue, state: ConfigState) -> ParseResult:

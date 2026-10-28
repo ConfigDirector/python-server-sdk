@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- An object flag whose in-code default value is a dict now resolves to the config's value only
+  when that value is a JSON object, and one whose in-code default value is a list only when it is
+  a JSON list. Any other value gives the in-code default value with `TYPE_MISMATCH`, and the
+  dashboard shows the Config type mismatch alert for the config, as it does for other mismatches.
+  Before, a JSON list reached a flag read with a dict, or a JSON object one read with a list, with
+  `TARGETING_MATCH`, and `get_object_value_async` returned a bare `42`, `"text"`, `true` or
+  `null` as the flag's value. Requires the `configdirector-server-sdk` release that carries the
+  same fix.
+
 ## [1.6.0] - 2026-10-22
 
 ### Added

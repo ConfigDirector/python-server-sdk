@@ -117,6 +117,7 @@ class TestResolution:
             config("whole-ratio", "float", "2"),
             config("theme", "json", '{"color": "blue", "sizes": [1, 2]}'),
             config("regions", "json", '["eu", "us"]'),
+            config("bare-limit", "json", "42"),
         )
         provider = provide(server)
         provider.initialize(EvaluationContext())
@@ -151,9 +152,23 @@ class TestResolution:
         details = provider.resolve_object_details("theme", {})
 
         assert details.value == {"color": "blue", "sizes": [1, 2]}
+        assert details.reason == Reason.TARGETING_MATCH
 
     def test_resolves_a_list(self, provider: ConfigDirectorProvider) -> None:
-        assert provider.resolve_object_details("regions", ()).value == ["eu", "us"]
+        details = provider.resolve_object_details("regions", ())
+
+        assert details.value == ["eu", "us"]
+        assert details.reason == Reason.TARGETING_MATCH
+
+    def test_reports_a_type_mismatch_for_an_object_flag_holding_a_number(
+        self, provider: ConfigDirectorProvider
+    ) -> None:
+        details = provider.resolve_object_details("bare-limit", {"max": 1})
+
+        assert details.value == {"max": 1}
+        assert details.reason == Reason.ERROR
+        assert details.error_code == ErrorCode.TYPE_MISMATCH
+        assert "bare-limit" in (details.error_message or "")
 
     def test_returns_the_default_for_an_unknown_flag(self, provider: ConfigDirectorProvider) -> None:
         details = provider.resolve_string_details("missing", "default")
