@@ -26,6 +26,7 @@ from configdirector_openfeature import ConfigDirectorProvider
 from dotenv import load_dotenv
 from openfeature import api
 from openfeature.client import OpenFeatureClient
+from openfeature.exception import ProviderNotReadyError
 from openfeature.provider import ProviderStatus
 
 load_dotenv()
@@ -61,8 +62,11 @@ def _register_provider() -> None:
     )
 
     # Blocks until the provider has initialized or its timeout has elapsed, so the first request
-    # is not answered with defaults while the initial config state is still in flight.
-    api.set_provider_and_wait(provider)
+    # is not answered with in-code default values while the initial config state is still in flight.
+    try:
+        api.set_provider_and_wait(provider)
+    except ProviderNotReadyError as error:
+        logger.warning("Starting on in-code default values until ConfigDirector sends config: %s", error)
     atexit.register(api.shutdown)
 
     logger.info(

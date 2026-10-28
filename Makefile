@@ -50,7 +50,7 @@ test:
 
 # The same tests against the oldest version of each direct dependency that pyproject.toml
 # claims to support, in a throwaway environment. Without this a floor such as
-# `openfeature-sdk>=0.8.2` is only ever a guess, because the lock always picks the newest.
+# `openfeature-sdk>=0.10` is only ever a guess, because the lock always picks the newest.
 test-lowest:
 	@for package in $(PACKAGES); do \
 		printf '\n\033[1m==> test-lowest %s\033[0m\n' "$$package"; \

@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- When no config arrives within the connection timeout, initialization now fails:
+  `set_provider_and_wait` raises, and the provider reports the `ERROR` status until config
+  arrives, then `READY`. Before, it reported `READY` while serving in-code default values, then
+  `READY` again once config arrived. To start without waiting for ConfigDirector, call
+  `set_provider` instead, or catch the exception.
+- Requires `openfeature-sdk` 0.10 or newer.
+
 ### Fixed
 
 - An object flag whose in-code default value is a dict now resolves to the config's value only

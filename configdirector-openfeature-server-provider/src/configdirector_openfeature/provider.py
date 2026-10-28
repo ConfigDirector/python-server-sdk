@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
+from enum import Enum, auto
 from typing import TypeVar
 
 from configdirector import (
@@ -20,9 +21,11 @@ from configdirector import (
 from configdirector._wrappers import Wrapper, create_wrapped_client
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.event import ProviderEventDetails
+from openfeature.exception import ProviderNotReadyError
 from openfeature.flag_evaluation import FlagResolutionDetails, FlagValueType
-from openfeature.provider import AbstractProvider
+from openfeature.provider import AbstractProvider, ProviderStatus
 from openfeature.provider import Metadata as ProviderMetadata
+from openfeature.provider._registry import provider_registry
 
 from ._context import to_context
 from ._resolution import to_resolution_details
@@ -32,9 +35,23 @@ __all__ = ["ConfigDirectorProvider"]
 
 _NAME = "ConfigDirectorProvider"
 
+_NO_CONFIG_IN_TIME = (
+    "No config arrived from ConfigDirector within the connection timeout. Flags resolve to their "
+    "in-code default values until config arrives."
+)
+
+_RECORDED_FAILURE_POLL_INTERVAL = 0.01
+
 _ValueT = TypeVar("_ValueT", bound=ConfigValue)
 
 _evaluated: ContextVar[ConfigEvaluation | None] = ContextVar("configdirector_evaluated", default=None)
+
+
+class _Startup(Enum):
+    INITIALIZING = auto()
+    AWAITING_RECORDED_FAILURE = auto()
+    AWAITING_CONFIG = auto()
+    READY = auto()
 
 
 class ConfigDirectorProvider(AbstractProvider):
@@ -62,10 +79,13 @@ class ConfigDirectorProvider(AbstractProvider):
     invalid, including any kind that is not a string, the whole context is ignored: the evaluation
     still resolves successfully, to the value for no context, and the SDK logs an error.
 
-    If the first config state does not arrive within the configured timeout, initialization
-    still completes and evaluations return their defaults with the error code
-    ``PROVIDER_NOT_READY``. The provider keeps connecting, and emits ``PROVIDER_READY`` once
-    config state arrives.
+    If no config arrives within the connection timeout, or ConfigDirector rejects the server SDK
+    key, initialization fails with :class:`~openfeature.exception.ProviderNotReadyError`:
+    ``set_provider_and_wait`` raises it, OpenFeature reports the ``ERROR`` status, and evaluations
+    return their in-code default values with the error code ``PROVIDER_NOT_READY``. After a
+    timeout the provider keeps connecting, and OpenFeature reports ``READY`` once config arrives.
+    To start without waiting for ConfigDirector, register the provider with ``set_provider``,
+    which initializes it in the background, or catch the error.
 
     In offline mode, ``connection=ConnectionOptions(mode="offline")``, the provider never connects
     to ConfigDirector and needs no server SDK key. It serves the values of a JSON file or of an
@@ -102,7 +122,9 @@ class ConfigDirectorProvider(AbstractProvider):
     ) -> None:
         super().__init__()
         self._lock = threading.Lock()
-        self._initialized = False
+        self._startup = _Startup.INITIALIZING
+        self._readiness_check: threading.Thread | None = None
+        self._shut_down = threading.Event()
         self._client = create_wrapped_client(
             Wrapper.OPENFEATURE_SERVER_PROVIDER,
             server_sdk_key,
@@ -128,16 +150,33 @@ class ConfigDirectorProvider(AbstractProvider):
         In offline mode, loads the offline values instead.
 
         Raises:
+            openfeature.exception.ProviderNotReadyError: If no config arrives within the
+                connection timeout, or ConfigDirector rejects the server SDK key.
             configdirector.ConfigDirectorInitializationError: If the offline values cannot be
                 loaded, ``file`` and ``values`` are both given, or either is given when the
                 connection mode is ``"streaming"`` or ``"polling"``.
         """
         self._client.initialize()
         with self._lock:
-            self._initialized = True
+            if self._client.is_ready:
+                self._startup = _Startup.READY
+                return
+            self._startup = _Startup.AWAITING_RECORDED_FAILURE
+            self._readiness_check = threading.Thread(
+                target=self._report_ready_once_the_failure_is_recorded,
+                name="configdirector-openfeature-readiness-check",
+                daemon=True,
+            )
+            self._readiness_check.start()
+        raise ProviderNotReadyError(_NO_CONFIG_IN_TIME)
 
     def shutdown(self) -> None:
         """Closes the connection to ConfigDirector and flushes pending telemetry."""
+        self._shut_down.set()
+        with self._lock:
+            readiness_check = self._readiness_check
+        if readiness_check is not None:
+            readiness_check.join()
         self._client.close()
 
     def resolve_boolean_details(
@@ -202,7 +241,19 @@ class ConfigDirectorProvider(AbstractProvider):
         )
 
     def _on_client_ready(self, _event: ClientReadyEvent) -> None:
+        self._report_ready_if_config_arrived()
+
+    def _report_ready_once_the_failure_is_recorded(self) -> None:
+        while provider_registry.get_provider_status(self) is not ProviderStatus.ERROR:
+            if self._shut_down.wait(_RECORDED_FAILURE_POLL_INTERVAL):
+                return
         with self._lock:
-            initialized = self._initialized
-        if initialized:
-            self.emit_provider_ready(ProviderEventDetails())
+            self._startup = _Startup.AWAITING_CONFIG
+        self._report_ready_if_config_arrived()
+
+    def _report_ready_if_config_arrived(self) -> None:
+        with self._lock:
+            if self._startup is not _Startup.AWAITING_CONFIG or not self._client.is_ready:
+                return
+            self._startup = _Startup.READY
+        self.emit_provider_ready(ProviderEventDetails())

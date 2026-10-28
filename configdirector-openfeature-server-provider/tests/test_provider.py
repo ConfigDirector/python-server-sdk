@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -8,10 +9,12 @@ import pytest
 from configdirector import ConfigDirectorInitializationError, ConfigDirectorValidationError, Metadata
 from openfeature import api
 from openfeature.evaluation_context import EvaluationContext
-from openfeature.event import EventDetails, ProviderEvent
-from openfeature.exception import ErrorCode
-from openfeature.flag_evaluation import Reason
-from openfeature.provider import ProviderStatus
+from openfeature.event import EventDetails, ProviderEvent, ProviderEventDetails
+from openfeature.exception import ErrorCode, OpenFeatureError, ProviderNotReadyError
+from openfeature.flag_evaluation import FlagEvaluationDetails, FlagValueType, Reason
+from openfeature.hook import Hook, HookContext, HookHints
+from openfeature.provider import FeatureProvider, ProviderStatus
+from openfeature.provider._registry import provider_registry
 
 from configdirector_openfeature import ConfigDirectorProvider, __version__
 from tests.conftest import OfflineProviderFactory, ProviderFactory, ServerFactory
@@ -20,17 +23,22 @@ from tests.helpers import (
     TELEMETRY_PATH,
     config,
     rule,
-    set_provider_and_wait,
     wait_for,
 )
 
 SDK_NAME = "python-openfeature-server-provider"
 
+READINESS_CHECK_THREAD = "configdirector-openfeature-readiness-check"
 
-class ReadyEvents:
-    def __init__(self) -> None:
+
+def readiness_check_is_running() -> bool:
+    return READINESS_CHECK_THREAD in [thread.name for thread in threading.enumerate()]
+
+
+class RecordedEvents:
+    def __init__(self, event: ProviderEvent) -> None:
         self.events: list[EventDetails] = []
-        api.get_client().add_handler(ProviderEvent.PROVIDER_READY, self)
+        api.get_client().add_handler(event, self)
 
     def __call__(self, details: EventDetails) -> None:
         if details.provider_name == "ConfigDirectorProvider":
@@ -38,6 +46,20 @@ class ReadyEvents:
 
     def __len__(self) -> int:
         return len(self.events)
+
+
+class RecordingHook(Hook):
+    def __init__(self) -> None:
+        self.after_details: list[FlagEvaluationDetails[FlagValueType]] = []
+        self.errors: list[Exception] = []
+
+    def after(
+        self, hook_context: HookContext, details: FlagEvaluationDetails[FlagValueType], hints: HookHints
+    ) -> None:
+        self.after_details.append(details)
+
+    def error(self, hook_context: HookContext, exception: Exception, hints: HookHints) -> None:
+        self.errors.append(exception)
 
 
 class TestIdentity:
@@ -273,7 +295,7 @@ class TestLifecycle:
     ) -> None:
         server = serve(config("enabled", "boolean", "true"))
 
-        set_provider_and_wait(provide(server))
+        api.set_provider_and_wait(provide(server))
         details = api.get_client().get_boolean_details("enabled", False)
 
         assert details.value is True
@@ -285,7 +307,7 @@ class TestLifecycle:
         changes: list[EventDetails] = []
         api.get_client().add_handler(ProviderEvent.PROVIDER_CONFIGURATION_CHANGED, changes.append)
 
-        set_provider_and_wait(provide(server))
+        api.set_provider_and_wait(provide(server))
 
         wait_for(lambda: bool(changes))
         assert changes[0].flags_changed == ["a", "b"]
@@ -296,7 +318,7 @@ class TestLifecycle:
         server = serve(config("a", "string", "1"), config("b", "string", "2"))
         changes: list[EventDetails] = []
         api.get_client().add_handler(ProviderEvent.PROVIDER_CONFIGURATION_CHANGED, changes.append)
-        set_provider_and_wait(provide(server, mode="streaming"))
+        api.set_provider_and_wait(provide(server, mode="streaming"))
         wait_for(lambda: bool(changes))
 
         server.push(config("a", "string", "3"))
@@ -305,33 +327,103 @@ class TestLifecycle:
         assert changes[1].flags_changed == ["a", "b"]
         assert api.get_client().get_string_value("b", "fallback") == "fallback"
 
-    def test_reports_not_ready_until_config_state_arrives(
+    def test_fails_to_initialize_when_no_config_state_arrives_within_the_timeout(
         self, serve: ServerFactory, provide: ProviderFactory
     ) -> None:
         server = serve(config("greeting", "string", "hello"))
         server.stream_released.clear()
-        provider = provide(server, mode="streaming", timeout=0.2)
-        ready = ReadyEvents()
+        errors = RecordedEvents(ProviderEvent.PROVIDER_ERROR)
+        changes_after_the_failure = RecordedEvents(ProviderEvent.PROVIDER_CONFIGURATION_CHANGED)
         client = api.get_client()
 
-        set_provider_and_wait(provider)
-        before = client.get_string_details("greeting", "default")
-        announced = len(ready)
+        with pytest.raises(ProviderNotReadyError) as failure:
+            api.set_provider_and_wait(provide(server, mode="streaming", timeout=0.2))
+        wait_for(lambda: not readiness_check_is_running())
+        status = client.get_provider_status()
+        details = client.get_string_details("greeting", "default")
         server.stream_released.set()
-        wait_for(lambda: len(ready) > announced)
-        after = client.get_string_details("greeting", "default")
+        wait_for(lambda: len(changes_after_the_failure) > 0)
 
-        assert (before.value, before.error_code) == ("default", ErrorCode.PROVIDER_NOT_READY)
-        assert (after.value, after.error_code) == ("hello", None)
+        assert failure.value.error_code == ErrorCode.PROVIDER_NOT_READY
+        assert status == ProviderStatus.ERROR
+        assert [event.error_code for event in errors.events] == [ErrorCode.PROVIDER_NOT_READY]
+        assert (details.value, details.error_code) == ("default", ErrorCode.PROVIDER_NOT_READY)
+
+    def test_fails_to_initialize_when_the_sdk_key_is_rejected(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve(config("greeting", "string", "hello"))
+        server.accepts_the_sdk_key = False
+        client = api.get_client()
+
+        with pytest.raises(ProviderNotReadyError) as failure:
+            api.set_provider_and_wait(provide(server))
+        details = client.get_string_details("greeting", "default")
+
+        assert failure.value.error_code == ErrorCode.PROVIDER_NOT_READY
+        assert client.get_provider_status() == ProviderStatus.ERROR
+        assert (details.value, details.error_code) == ("default", ErrorCode.PROVIDER_NOT_READY)
+
+    def test_reports_ready_once_when_config_state_arrives_after_a_failed_initialization(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve(config("greeting", "string", "hello"))
+        server.stream_released.clear()
+        ready = RecordedEvents(ProviderEvent.PROVIDER_READY)
+        errors = RecordedEvents(ProviderEvent.PROVIDER_ERROR)
+        changes = RecordedEvents(ProviderEvent.PROVIDER_CONFIGURATION_CHANGED)
+        client = api.get_client()
+        with contextlib.suppress(ProviderNotReadyError):
+            api.set_provider_and_wait(provide(server, mode="streaming", timeout=0.2))
+        wait_for(lambda: len(ready) + len(errors) > 0)
+        announced_before_config = len(ready)
+
+        server.stream_released.set()
+        wait_for(lambda: len(ready) > announced_before_config)
+        server.push(config("greeting", "string", "hello again"))
+        wait_for(lambda: len(changes) == 2)
+        details = client.get_string_details("greeting", "default")
+
+        assert len(ready) == 1
         assert client.get_provider_status() == ProviderStatus.READY
+        assert (details.value, details.error_code) == ("hello again", None)
+
+    def test_reports_ready_when_config_state_arrives_while_openfeature_records_the_failure(
+        self, serve: ServerFactory, provide: ProviderFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = serve(config("greeting", "string", "hello"))
+        server.stream_released.clear()
+        provider = provide(server, mode="streaming", timeout=0.2)
+        config_state_handled = threading.Event()
+        provider._client.on("client_ready", lambda _event: config_state_handled.set())
+        config_state_handled_before_the_error_was_recorded: list[bool] = []
+        dispatch_event = provider_registry.dispatch_event
+
+        def deliver_config_state_before_recording_the_failure(
+            source: FeatureProvider, event: ProviderEvent, details: ProviderEventDetails
+        ) -> None:
+            if event == ProviderEvent.PROVIDER_ERROR:
+                server.stream_released.set()
+                config_state_handled_before_the_error_was_recorded.append(config_state_handled.wait(5))
+            dispatch_event(source, event, details)
+
+        monkeypatch.setattr(
+            provider_registry, "dispatch_event", deliver_config_state_before_recording_the_failure
+        )
+
+        with contextlib.suppress(ProviderNotReadyError):
+            api.set_provider_and_wait(provider)
+        wait_for(lambda: api.get_client().get_provider_status() == ProviderStatus.READY)
+
+        assert config_state_handled_before_the_error_was_recorded == [True]
 
     def test_does_not_announce_ready_twice_when_config_state_arrives_in_time(
         self, serve: ServerFactory, provide: ProviderFactory
     ) -> None:
         server = serve(config("greeting", "string", "hello"))
-        ready = ReadyEvents()
+        ready = RecordedEvents(ProviderEvent.PROVIDER_READY)
 
-        set_provider_and_wait(provide(server))
+        api.set_provider_and_wait(provide(server))
 
         assert len(ready) == 1
 
@@ -343,12 +435,55 @@ class TestLifecycle:
 
         assert provider._client.closed is True
 
+    def test_shutting_down_stops_waiting_for_openfeature_to_record_a_failure(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve(config("greeting", "string", "hello"))
+        server.available = False
+        provider = provide(server, timeout=0.2)
+        with contextlib.suppress(ProviderNotReadyError):
+            provider.initialize(EvaluationContext())
+
+        provider.shutdown()
+
+        assert readiness_check_is_running() is False
+
+
+class TestHooks:
+    def test_runs_an_after_hook_that_sees_targeting_match_and_the_value_id_for_a_served_value(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        api.set_provider_and_wait(provide(serve(config("enabled", "boolean", "true"))))
+        hook = RecordingHook()
+        client = api.get_client()
+        client.add_hooks([hook])
+
+        client.get_boolean_value("enabled", False)
+
+        assert [(details.reason, details.variant) for details in hook.after_details] == [
+            (Reason.TARGETING_MATCH, "default-of-enabled")
+        ]
+
+    def test_runs_an_error_hook_that_sees_flag_not_found_for_a_config_that_does_not_exist(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        api.set_provider_and_wait(provide(serve()))
+        hook = RecordingHook()
+        client = api.get_client()
+        client.add_hooks([hook])
+
+        client.get_boolean_value("missing", False)
+
+        [error] = hook.errors
+        assert isinstance(error, OpenFeatureError)
+        assert error.error_code == ErrorCode.FLAG_NOT_FOUND
+
 
 class TestOfflineMode:
     def test_resolves_the_offline_values_without_a_server_sdk_key(
         self, provide_offline: OfflineProviderFactory
     ) -> None:
-        set_provider_and_wait(provide_offline(values={"enabled": True}))
+        api.set_provider_and_wait(provide_offline(values={"enabled": True}))
 
         details = api.get_client().get_boolean_details("enabled", False)
 
@@ -368,6 +503,6 @@ class TestOfflineMode:
         provider = provide_offline(file=str(tmp_path / "missing.json"))
 
         with contextlib.suppress(ConfigDirectorInitializationError):
-            set_provider_and_wait(provider)
+            api.set_provider_and_wait(provider)
 
         assert api.get_client().get_provider_status() == ProviderStatus.ERROR

@@ -25,7 +25,20 @@ client = api.get_client()
 new_checkout = client.get_boolean_value("new-checkout", False)
 ```
 
-`set_provider_and_wait` needs `openfeature-sdk` 0.10 or newer. On an older version use `api.set_provider`, which waits for the provider to initialize there.
+`set_provider_and_wait` waits up to the connection timeout, 3 seconds by default, for config to arrive. If none arrives in time, or ConfigDirector rejects the server SDK key, it raises `openfeature.exception.ProviderNotReadyError` and OpenFeature reports the `ERROR` status. Evaluations then return their in-code default values with `PROVIDER_NOT_READY`. After a timeout the provider keeps connecting, and OpenFeature reports `READY` once config arrives.
+
+To start without waiting for ConfigDirector, call `api.set_provider` instead, which initializes the provider in the background, or catch the error:
+
+```python
+import logging
+
+from openfeature.exception import ProviderNotReadyError
+
+try:
+    api.set_provider_and_wait(ConfigDirectorProvider("YOUR-SERVER-SDK-KEY"))
+except ProviderNotReadyError as error:
+    logging.warning("Starting on in-code default values until ConfigDirector sends config: %s", error)
+```
 
 The provider accepts the same `metadata`, `connection`, `logger`, `log_level`, and `telemetry` options as the server SDK's `create_client`.
 
@@ -63,7 +76,7 @@ Without a `kind` attribute the context is a `user`, and a `kind` inside `traits`
 | The value does not match the requested type | `ERROR` | `TYPE_MISMATCH` |
 | No config state has been received yet | `ERROR` | `PROVIDER_NOT_READY` |
 
-If the first config state does not arrive within the configured timeout, initialization still completes and evaluations return their defaults. The provider keeps connecting, and emits `PROVIDER_READY` once config state arrives. It emits `PROVIDER_CONFIGURATION_CHANGED` whenever configs are updated, with the keys the update carried followed by the keys a full update removed.
+`PROVIDER_READY` fires once, when config first arrives. The provider emits `PROVIDER_CONFIGURATION_CHANGED` whenever configs are updated, with the keys the update carried followed by the keys a full update removed.
 
 ## Test your code
 

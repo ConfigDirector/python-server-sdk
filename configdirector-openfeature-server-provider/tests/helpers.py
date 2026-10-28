@@ -8,9 +8,6 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from openfeature import api
-from openfeature.provider import FeatureProvider
-
 POLLING_PATH = "/server/polling/v1"
 STREAMING_PATH = "/server/sse/v1"
 TELEMETRY_PATH = "/server/telemetry/v1"
@@ -77,7 +74,9 @@ class FakeConfigDirectorServer:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}")
                 outer.requests.append(Request(self.path, dict(self.headers), body))
-                if self.path == STREAMING_PATH:
+                if self.path in (STREAMING_PATH, POLLING_PATH) and not outer.accepts_the_sdk_key:
+                    outer._respond(self, 401, "")
+                elif self.path == STREAMING_PATH:
                     outer._stream(self)
                 elif self.path == POLLING_PATH and outer.available:
                     outer._respond(self, 200, outer._bundle)
@@ -92,6 +91,7 @@ class FakeConfigDirectorServer:
         self._bundle = bundle(*configs)
         self._pushed: queue.Queue[str] = queue.Queue()
         self.available = True
+        self.accepts_the_sdk_key = True
         self.stream_released = threading.Event()
         self.stream_released.set()
         self._closing = threading.Event()
@@ -159,7 +159,3 @@ def wait_for(condition: Callable[[], bool], timeout: float = 5.0) -> None:
             return
         time.sleep(0.01)
     raise AssertionError("Timed out waiting for the condition to become true")
-
-
-def set_provider_and_wait(provider: FeatureProvider) -> None:
-    getattr(api, "set_provider_and_wait", api.set_provider)(provider)

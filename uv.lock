@@ -84,7 +84,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "configdirector-server-sdk", editable = "configdirector-server-sdk" },
-    { name = "openfeature-sdk", specifier = ">=0.8.2,<1" },
+    { name = "openfeature-sdk", specifier = ">=0.10,<1" },
 ]
 
 [package.metadata.requires-dev]

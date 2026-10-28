@@ -89,12 +89,14 @@ process, which is correct: a connection cannot be shared across processes.
 
 ## What else it demonstrates
 
-**Initialization is non-fatal.** `set_provider_and_wait` blocks until the initial config state
-arrives or the timeout elapses. If ConfigDirector cannot be reached the app still starts, serves
-the defaults it passes in, and the provider keeps connecting in the background.
+**A failed initialization is non-fatal.** `set_provider_and_wait` blocks until the initial config
+state arrives or the timeout elapses, and raises `ProviderNotReadyError` when no config arrives in
+time. The app catches it, logs a warning and still starts: it serves the in-code default values it
+passes in, the provider keeps connecting in the background, and OpenFeature reports the provider
+ready once config arrives.
 
-**Defaults are the fallback.** Every evaluation passes the value to serve when ConfigDirector is
-unreachable, so it should be the safe choice.
+**In-code default values are the fallback.** Every evaluation passes the value to serve when
+ConfigDirector is unreachable, so it should be the safe choice.
 
 **Context is per-request; the provider is not.** `context_from_request()` maps query parameters
 onto an OpenFeature `EvaluationContext`; a real app would build this from the authenticated
@@ -124,6 +126,7 @@ which lets the next test register its own provider.
 
 ## Running without a server SDK key
 
-Without a valid key the provider never receives config state and every flag falls back to the
-default this app passes in. That is the same path a production app takes when it cannot reach
-ConfigDirector, so it is worth seeing: the app keeps serving, on the defaults you chose.
+Without a valid key ConfigDirector rejects the key, the provider never receives config state, and
+every flag falls back to the in-code default value this app passes in. That is the same path a
+production app takes when it cannot reach ConfigDirector, so it is worth seeing: the app logs a
+warning at startup and keeps serving, on the in-code default values you chose.
