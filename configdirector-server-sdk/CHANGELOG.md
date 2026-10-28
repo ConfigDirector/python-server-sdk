@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-10-28
+
 ### Fixed
 
 - `get_value(key, {})` now returns the config's value only when the config holds a JSON object,

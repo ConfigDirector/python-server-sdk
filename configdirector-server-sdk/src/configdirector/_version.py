@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__version__ = "1.8.0"
+__version__ = "1.8.1"
 
 
 @dataclass(frozen=True, slots=True)

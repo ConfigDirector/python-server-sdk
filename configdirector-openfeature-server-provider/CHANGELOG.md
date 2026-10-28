@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-28
+
 ### Changed
 
 - When no config arrives within the connection timeout, initialization now fails:
@@ -23,8 +25,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   dashboard shows the Config type mismatch alert for the config, as it does for other mismatches.
   Before, a JSON list reached a flag read with a dict, or a JSON object one read with a list, with
   `TARGETING_MATCH`, and `get_object_value_async` returned a bare `42`, `"text"`, `true` or
-  `null` as the flag's value. Requires the `configdirector-server-sdk` release that carries the
-  same fix.
+  `null` as the flag's value. Requires `configdirector-server-sdk` 1.8.1 or later, which carries
+  the same fix.
 
 ## [1.6.0] - 2026-10-22
 
