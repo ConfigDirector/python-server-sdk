@@ -31,6 +31,13 @@ from .queue import (
     aggregate,
 )
 from .reporter import EventReport, EventReporter, HttpEventReporter, ReporterResponse
+from .tracked_events import (
+    TRACKED_EVENT_WARNING_MESSAGES,
+    TrackedEventAdmission,
+    TrackedEventAdmitted,
+    TrackedEventDropped,
+    admit_tracked_event,
+)
 from .value_id import VALUE_ID_LENGTH, generate_value_id
 
 __all__ = [
@@ -40,6 +47,7 @@ __all__ = [
     "KIND_SAMPLE_LIMIT",
     "MAX_EVENT_QUEUE_LIMIT",
     "MIN_EVENT_QUEUE_LIMIT",
+    "TRACKED_EVENT_WARNING_MESSAGES",
     "VALUE_ID_LENGTH",
     "AggregatedEvent",
     "ContextRegistry",
@@ -58,6 +66,10 @@ __all__ = [
     "TelemetryCollectorOptions",
     "TelemetryProtocol",
     "TelemetryValue",
+    "TrackedEventAdmission",
+    "TrackedEventAdmitted",
+    "TrackedEventDropped",
+    "admit_tracked_event",
     "aggregate",
     "generate_value_id",
     "render_value",

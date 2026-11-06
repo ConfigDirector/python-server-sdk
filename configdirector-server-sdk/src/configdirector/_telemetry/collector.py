@@ -7,13 +7,21 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .._context_kind import effective_kind
 from .._http import HttpClient
 from .._version import SdkIdentity
 from ..types import ConfigDirectorLogger, ConfigType, ConfigValue, Context, EvaluationReason
 from .events import EvaluatedConfigEvent
-from .queue import ContextRegistry, EventQueue, InvalidContextRecording, InvalidContextSubmissions, aggregate
+from .queue import (
+    ContextRegistry,
+    EventQueue,
+    InvalidContextRecording,
+    InvalidContextSubmissions,
+    TrackedEventQueue,
+    aggregate,
+)
+from .reported_context import reported_context_of
 from .reporter import EventReport, EventReporter, HttpEventReporter
+from .tracked_events import TRACKED_EVENT_WARNING_MESSAGES, TrackedEventAdmission
 
 __all__ = [
     "DEFAULT_EVENT_QUEUE_LIMIT",
@@ -77,6 +85,8 @@ class TelemetryProtocol(Protocol):
 
     def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording: ...
 
+    def record_tracked_event(self, admission: TrackedEventAdmission) -> None: ...
+
     def close(self) -> None: ...
 
 
@@ -100,6 +110,7 @@ class TelemetryCollector:
         self._contexts = ContextRegistry(limit - evaluation_limit)
         self._invalid_contexts = InvalidContextSubmissions()
         self._invalid_contexts_after_stopping = InvalidContextSubmissions()
+        self._tracked_events = TrackedEventQueue()
 
         self._lock = threading.Lock()
         # Held for the whole of a flush, so that a report triggered by close() cannot overtake
@@ -132,12 +143,10 @@ class TelemetryCollector:
 
         # An anonymous context still targets rules, but it is not persisted and must not be
         # identifiable in what is reported.
-        context_id: str | None = None
-        context_kind: str | None = None
-        if context is not None and context.id and not context.anonymous:
-            context_id = context.id
-            context_kind = effective_kind(context)
-            self._contexts.add(context_kind, context_id, context)
+        reported_context = reported_context_of(context)
+        if context is not None and reported_context is not None:
+            self._contexts.add(*reported_context, context)
+        context_kind, context_id = reported_context or (None, None)
 
         self._events.push(
             EvaluatedConfigEvent.of(
@@ -162,6 +171,15 @@ class TelemetryCollector:
                 return self._invalid_contexts.record(kind_sample)
             return self._invalid_contexts_after_stopping.record(kind_sample)
 
+    def record_tracked_event(self, admission: TrackedEventAdmission) -> None:
+        if not self._is_collecting():
+            return
+        for warning in self._tracked_events.add(admission):
+            self._logger.warning(
+                "%s Further tracked events like it are not logged until the next telemetry batch is sent.",
+                TRACKED_EVENT_WARNING_MESSAGES[warning],
+            )
+
     # Reports everything collected so far without waiting for the next interval, blocking until
     # the request completes. Nothing is sent when there is nothing to report.
     def flush(self) -> None:
@@ -178,6 +196,7 @@ class TelemetryCollector:
                 contexts=contexts,
                 dropped_contexts=dropped_contexts,
                 invalid_contexts=self._invalid_contexts.take_snapshot(),
+                tracked_events=self._tracked_events.take_batch(),
             )
             if report.is_empty:
                 return
@@ -210,6 +229,7 @@ class TelemetryCollector:
         self._events.clear()
         self._contexts.clear()
         self._invalid_contexts.clear()
+        self._tracked_events.clear()
 
     def _run(self) -> None:
         delay = self._initial_flush_delay
@@ -233,6 +253,7 @@ class TelemetryCollector:
         self._events.clear()
         self._contexts.clear()
         self._invalid_contexts.clear()
+        self._tracked_events.clear()
         self._logger.warning(
             "[TelemetryCollector] Received a fatal error while reporting telemetry. No longer "
             "collecting events."

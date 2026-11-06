@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -16,7 +17,7 @@ from configdirector import (
     ConfigsUpdatedEvent,
     Context,
 )
-from configdirector.testing import TestClient, create_test_client
+from configdirector.testing import TestClient, TrackedEvent, create_test_client
 from tests.helpers import RecordingLogger, ThreadWatch, wait_for
 
 PROMPTLY = 5.0
@@ -776,3 +777,106 @@ class TestFactory:
         assert client.is_ready is True
         assert client.get_value("flag", False) is True
         assert ready() == 1
+
+
+class TestTrackedEvents:
+    def test_records_tracked_events_in_call_order_with_their_context_value_and_details(
+        self, create: Callable[..., TestClient]
+    ) -> None:
+        test_client = create()
+
+        test_client.client.track("checkout-started", Context(id="user-1", kind="user"))
+        test_client.client.track(
+            "checkout-completed", Context(id="user-1"), value=49.9, details={"plan": "pro"}
+        )
+
+        assert test_client.tracked_events == [
+            TrackedEvent(name="checkout-started", context=Context(id="user-1", kind="user")),
+            TrackedEvent(
+                name="checkout-completed", context=Context(id="user-1"), value=49.9, details={"plan": "pro"}
+            ),
+        ]
+
+    def test_records_an_event_tracked_without_a_context(self, create: Callable[..., TestClient]) -> None:
+        test_client = create()
+
+        test_client.client.track("nightly-import-finished")
+
+        assert test_client.tracked_events == [TrackedEvent(name="nightly-import-finished", context=None)]
+
+    def test_records_a_decimal_value_as_it_was_tracked(self, create: Callable[..., TestClient]) -> None:
+        test_client = create()
+
+        test_client.client.track("checkout-completed", value=Decimal("49.90"))
+
+        assert str(test_client.tracked_events[0].value) == "49.90"
+
+    def test_does_not_record_an_event_whose_name_has_151_characters_and_logs_a_warning(
+        self, create: Callable[..., TestClient], logger: RecordingLogger
+    ) -> None:
+        test_client = create()
+
+        test_client.client.track("n" * 151)
+
+        assert test_client.tracked_events == []
+        assert len(logger.messages("warning")) == 1
+
+    def test_records_an_event_without_details_of_more_than_20_top_level_keys_and_logs_a_warning(
+        self, create: Callable[..., TestClient], logger: RecordingLogger
+    ) -> None:
+        test_client = create()
+        details = {f"key-{number}": number for number in range(1, 22)}
+
+        test_client.client.track("checkout-completed", Context(id="user-1"), value=49.9, details=details)
+
+        assert test_client.tracked_events == [
+            TrackedEvent(name="checkout-completed", context=Context(id="user-1"), value=49.9)
+        ]
+        assert len(logger.messages("warning")) == 1
+
+    def test_records_an_event_without_a_value_that_is_not_a_finite_number_and_logs_a_warning(
+        self, create: Callable[..., TestClient], logger: RecordingLogger
+    ) -> None:
+        test_client = create()
+
+        test_client.client.track("checkout-completed", value=float("inf"))
+
+        assert test_client.tracked_events == [TrackedEvent(name="checkout-completed")]
+        assert len(logger.messages("warning")) == 1
+
+    def test_logs_a_warning_for_every_event_with_the_same_cause(
+        self, create: Callable[..., TestClient], logger: RecordingLogger
+    ) -> None:
+        test_client = create()
+
+        test_client.client.track("")
+        test_client.client.track("")
+
+        assert len(logger.messages("warning")) == 2
+
+    def test_records_more_than_1000_events(self, create: Callable[..., TestClient]) -> None:
+        test_client = create()
+
+        for number in range(1, 1_002):
+            test_client.client.track(f"event-{number}")
+
+        assert len(test_client.tracked_events) == 1_001
+
+    def test_records_an_event_without_the_context_whose_kind_is_invalid(
+        self, create: Callable[..., TestClient], logger: RecordingLogger
+    ) -> None:
+        test_client = create()
+
+        test_client.client.track("checkout-completed", Context(id="acme", kind="Tenant"))
+
+        assert test_client.tracked_events == [TrackedEvent(name="checkout-completed")]
+
+    def test_records_nothing_for_an_event_tracked_after_close(
+        self, create: Callable[..., TestClient]
+    ) -> None:
+        test_client = create()
+        test_client.close()
+
+        test_client.client.track("checkout-completed")
+
+        assert test_client.tracked_events == []

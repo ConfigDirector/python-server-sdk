@@ -15,6 +15,7 @@ from configdirector import (
     Metadata,
     TelemetryOptions,
 )
+from configdirector._logger import get_default_logger
 from configdirector._wrappers import Wrapper, create_wrapped_client
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.event import ProviderEventDetails
@@ -23,6 +24,7 @@ from openfeature.flag_evaluation import FlagResolutionDetails, FlagValueType
 from openfeature.provider import AbstractProvider, ProviderStatus
 from openfeature.provider import Metadata as ProviderMetadata
 from openfeature.provider._registry import provider_registry
+from openfeature.track import TrackingEventDetails, TrackingValue
 
 from ._context import to_context
 from ._resolution import to_resolution_details
@@ -40,6 +42,14 @@ _NO_CONFIG_IN_TIME = (
 _RECORDED_FAILURE_POLL_INTERVAL = 0.01
 
 _ValueT = TypeVar("_ValueT", bound=ConfigValue)
+
+
+def _attributes_as_details(attributes: dict[str, TrackingValue]) -> dict[str, TrackingValue] | None:
+    try:
+        plain_attributes: dict[str, TrackingValue] = to_plain(attributes)
+    except RecursionError:
+        return attributes
+    return plain_attributes or None
 
 
 class _Startup(Enum):
@@ -78,6 +88,18 @@ class ConfigDirectorProvider(AbstractProvider):
 
     Evaluation details carry the variation's name as the ``variant`` when the value served belongs
     to a named variation, and the value's id otherwise.
+
+    An OpenFeature client's ``track`` reports to ConfigDirector that something happened, such as a
+    completed checkout, with the next telemetry batch: the details' ``value`` as the event's value,
+    their other attributes as the event's details, and the evaluation context as the context the
+    event happened for. An event counts for an experiment only when its evaluation context has the
+    targeting key the experiment's flag was evaluated with. Without one the event is still
+    reported, and the targeting key of a context marked ``anonymous`` is not sent. A telemetry batch
+    holds at most 1,000 tracked events, and events beyond that are not reported. An event whose name
+    does not have 1 to 150 characters is not reported. Details with more than 20 top-level keys or
+    larger than 1 KB as JSON, and a value that is not a finite number, are left out and the event is
+    still reported. Each of these logs one warning per telemetry batch. ``track`` does nothing in
+    offline mode.
 
     If no config arrives within the connection timeout, or ConfigDirector rejects the server SDK
     key, initialization fails with :class:`~openfeature.exception.ProviderNotReadyError`:
@@ -125,13 +147,13 @@ class ConfigDirectorProvider(AbstractProvider):
         self._startup = _Startup.INITIALIZING
         self._readiness_check: threading.Thread | None = None
         self._shut_down = threading.Event()
+        self._logger = logger if logger is not None else get_default_logger(log_level)
         self._client = create_wrapped_client(
             Wrapper.OPENFEATURE_SERVER_PROVIDER,
             server_sdk_key,
             metadata=metadata,
             connection=connection,
-            logger=logger,
-            log_level=log_level,
+            logger=self._logger,
             telemetry=telemetry,
             hooks=ClientHooks(
                 client_ready=self._on_client_ready,
@@ -223,6 +245,24 @@ class ConfigDirectorProvider(AbstractProvider):
         """Evaluates ``flag_key`` as a JSON object or array."""
         default: dict[str, FlagValueType] | list[FlagValueType] = to_plain(default_value)
         return self._resolve(flag_key, default, evaluation_context)
+
+    def track(
+        self,
+        tracking_event_name: str,
+        evaluation_context: EvaluationContext | None = None,
+        tracking_event_details: TrackingEventDetails | None = None,
+    ) -> None:
+        """Reports to ConfigDirector that something happened. Never raises."""
+        details = tracking_event_details if tracking_event_details is not None else TrackingEventDetails()
+        try:
+            self._client.track(
+                tracking_event_name,
+                to_context(evaluation_context),
+                value=details.value,
+                details=_attributes_as_details(details.attributes),
+            )
+        except Exception as error:
+            self._logger.warning("A tracked event was not reported because it could not be read: %r", error)
 
     def _resolve(
         self, flag_key: str, default_value: _ValueT, evaluation_context: EvaluationContext | None

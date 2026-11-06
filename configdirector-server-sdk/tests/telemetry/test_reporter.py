@@ -11,6 +11,7 @@ from configdirector._telemetry import reporter as reporter_module
 from configdirector._telemetry.events import EvaluatedConfigEvent
 from configdirector._telemetry.queue import AggregatedEvent, InvalidContextEntry
 from configdirector._telemetry.reporter import EventReport, HttpEventReporter
+from configdirector._telemetry.tracked_events import TrackedEventEntry
 from configdirector._version import SdkIdentity
 from configdirector.errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 from configdirector.types import Context
@@ -67,13 +68,18 @@ def report(
     dropped_evaluations: int = 0,
     dropped_contexts: int = 0,
     invalid_contexts: list[InvalidContextEntry] | None = None,
+    tracked_events: list[TrackedEventEntry] | None = None,
 ) -> EventReport:
     return EventReport(
-        evaluations=[AggregatedEvent(start_time=START, end_time=END, count=1, event=e) for e in events],
+        evaluations=[
+            AggregatedEvent(start_time=START, end_time=END, count=1, event=evaluated_config)
+            for evaluated_config in events
+        ],
         dropped_evaluations=dropped_evaluations,
         contexts=contexts or [],
         dropped_contexts=dropped_contexts,
         invalid_contexts=invalid_contexts or [],
+        tracked_events=tracked_events or [],
     )
 
 
@@ -225,6 +231,67 @@ class TestPayload:
 
         assert http.payload["aggregatedEvents"]["evaluatedConfig"][0]["event"]["contextId"] == "user-a"
 
+    def test_sends_each_tracked_event_with_its_context_value_details_and_time(
+        self, reporter: HttpEventReporter, http: StubHttp
+    ) -> None:
+        entry = TrackedEventEntry(
+            name="checkout-completed",
+            happened_at=START,
+            context_kind="organization",
+            context_identifier="acme",
+            value=49.9,
+            details={"plan": "pro"},
+        )
+
+        reporter.report(report(contexts=[Context(id="user-a")], tracked_events=[entry]))
+
+        assert http.payload["discreteEvents"] == {
+            "capturedContexts": [{"id": "user-a", "kind": "user"}],
+            "trackedEvents": [
+                {
+                    "name": "checkout-completed",
+                    "contextKind": "organization",
+                    "contextIdentifier": "acme",
+                    "value": 49.9,
+                    "details": {"plan": "pro"},
+                    "happenedAt": "2026-01-01T00:00:00.500Z",
+                }
+            ],
+        }
+
+    def test_sends_a_tracked_event_without_the_fields_it_does_not_have(
+        self, reporter: HttpEventReporter, http: StubHttp
+    ) -> None:
+        reporter.report(report(tracked_events=[TrackedEventEntry(name="checkout", happened_at=START)]))
+
+        assert http.payload["discreteEvents"]["trackedEvents"] == [
+            {"name": "checkout", "happenedAt": "2026-01-01T00:00:00.500Z"}
+        ]
+
+    def test_sends_an_empty_list_of_tracked_events_when_there_were_none(
+        self, reporter: HttpEventReporter, http: StubHttp
+    ) -> None:
+        reporter.report(report(event()))
+
+        assert http.payload["discreteEvents"]["trackedEvents"] == []
+
+    def test_writes_text_outside_ascii_as_utf8_rather_than_escaping_it(
+        self, reporter: HttpEventReporter, http: StubHttp
+    ) -> None:
+        entry = TrackedEventEntry(name="checkout", happened_at=START, details={"note": "é"})
+
+        reporter.report(report(tracked_events=[entry]))
+
+        assert "é".encode() in http.calls[-1].body
+        assert b"\\u00e9" not in http.calls[-1].body
+
+    def test_still_sends_a_report_holding_text_that_utf8_cannot_represent(
+        self, reporter: HttpEventReporter, http: StubHttp
+    ) -> None:
+        reporter.report(report(contexts=[Context(id="user-\ud83d")]))
+
+        assert http.payload["discreteEvents"]["capturedContexts"][0]["id"] == "user-?"
+
     def test_sends_the_invalid_context_submissions_with_their_kind_samples(
         self, reporter: HttpEventReporter, http: StubHttp
     ) -> None:
@@ -307,6 +374,13 @@ class TestEmptyReports:
 
         assert len(http.calls) == 1
 
+    def test_sends_a_report_that_holds_only_tracked_events(
+        self, reporter: HttpEventReporter, http: StubHttp
+    ) -> None:
+        reporter.report(report(tracked_events=[TrackedEventEntry(name="checkout", happened_at=START)]))
+
+        assert len(http.calls) == 1
+
 
 class TestFailures:
     def test_a_successful_status_reports_success(self, reporter: HttpEventReporter, http: StubHttp) -> None:
@@ -325,6 +399,20 @@ class TestFailures:
         assert response.success is False
         assert response.fatal is True
         assert any(str(status) in message for message in logger.messages("warning"))
+
+    def test_a_report_too_large_for_configdirector_is_discarded_with_a_warning_and_reporting_continues(
+        self, reporter: HttpEventReporter, http: StubHttp, logger: RecordingLogger
+    ) -> None:
+        http.status = 413
+
+        response = reporter.report(report(event("too-large")))
+        http.status = 204
+        reporter.report(report(event("next")))
+
+        assert response.success is False
+        assert response.fatal is False
+        assert any("413" in message for message in logger.messages("warning"))
+        assert len(http.calls) == 2
 
     def test_a_rate_limit_is_worth_retrying(self, reporter: HttpEventReporter, http: StubHttp) -> None:
         http.status = 429

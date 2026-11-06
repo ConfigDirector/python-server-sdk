@@ -81,6 +81,28 @@ default value with the `value-missing` reason. Reasons arrive on `evaluate` and 
 After a failed attempt, the next `initialize` succeeds and delivers the values stored in the
 meantime.
 
+### Tracked events
+
+`test_client.tracked_events` holds every event the code under test tracked, in call order, as
+`TrackedEvent(name, context, value, details)`, so a test can assert on them:
+
+```python
+from configdirector import Context
+from configdirector.testing import TrackedEvent, create_test_client
+
+with create_test_client() as test_client:
+    test_client.client.track("checkout-completed", Context(id="user-123"), value=49.9)
+
+    assert test_client.tracked_events == [
+        TrackedEvent(name="checkout-completed", context=Context(id="user-123"), value=49.9)
+    ]
+```
+
+The record follows the rules of a real report: an event whose name does not have 1 to 150
+characters is not recorded, and a value or details the SDK would leave out are missing from the
+record, with a warning logged each time. The limit of 1,000 events per telemetry batch does not
+apply.
+
 ### Options
 
 `create_test_client(values, timeout=..., logger=...)` takes `timeout` (the client's connection

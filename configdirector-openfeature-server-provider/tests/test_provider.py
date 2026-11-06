@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import contextlib
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from configdirector import ConfigDirectorInitializationError, ConfigDirectorValidationError, Metadata
@@ -15,12 +16,14 @@ from openfeature.flag_evaluation import FlagEvaluationDetails, FlagValueType, Re
 from openfeature.hook import Hook, HookContext, HookHints
 from openfeature.provider import FeatureProvider, ProviderStatus
 from openfeature.provider._registry import provider_registry
+from openfeature.track import TrackingEventDetails, TrackingValue
 
 from configdirector_openfeature import ConfigDirectorProvider, __version__
 from tests.conftest import OfflineProviderFactory, ProviderFactory, ServerFactory
 from tests.helpers import (
     POLLING_PATH,
     TELEMETRY_PATH,
+    FakeConfigDirectorServer,
     config,
     rule,
     wait_for,
@@ -679,3 +682,141 @@ class TestOfflineMode:
             api.set_provider_and_wait(provider)
 
         assert api.get_client().get_provider_status() == ProviderStatus.ERROR
+
+
+class TestTrack:
+    @staticmethod
+    def entries_sent_on_shutdown(
+        provider: ConfigDirectorProvider, server: FakeConfigDirectorServer
+    ) -> list[dict[str, Any]]:
+        provider.shutdown()
+        entries: list[dict[str, Any]] = server.requests_to(TELEMETRY_PATH)[0].body["discreteEvents"][
+            "trackedEvents"
+        ]
+        return [
+            {field: value for field, value in entry.items() if field != "happenedAt"} for entry in entries
+        ]
+
+    def test_reports_a_tracked_event_with_its_value_its_attributes_and_the_evaluation_context(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve()
+        provider = provide(server)
+        api.set_provider_and_wait(provider)
+
+        api.get_client().track(
+            "checkout-completed",
+            EvaluationContext("acme", {"kind": "organization"}),
+            TrackingEventDetails(value=49.9, attributes={"plan": "pro", "seats": 3}),
+        )
+
+        assert self.entries_sent_on_shutdown(provider, server) == [
+            {
+                "name": "checkout-completed",
+                "contextKind": "organization",
+                "contextIdentifier": "acme",
+                "value": 49.9,
+                "details": {"plan": "pro", "seats": 3},
+            }
+        ]
+
+    def test_reports_an_event_tracked_without_details_or_an_evaluation_context_with_its_name_alone(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve()
+        provider = provide(server)
+        api.set_provider_and_wait(provider)
+
+        api.get_client().track("nightly-import-finished")
+
+        assert self.entries_sent_on_shutdown(provider, server) == [{"name": "nightly-import-finished"}]
+
+    def test_reports_an_event_tracked_with_a_value_alone_without_details(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve()
+        provider = provide(server)
+        api.set_provider_and_wait(provider)
+
+        api.get_client().track(
+            "checkout-completed", EvaluationContext("user-1"), TrackingEventDetails(value=49.9)
+        )
+
+        assert self.entries_sent_on_shutdown(provider, server) == [
+            {
+                "name": "checkout-completed",
+                "contextKind": "user",
+                "contextIdentifier": "user-1",
+                "value": 49.9,
+            }
+        ]
+
+    def test_reports_a_date_in_the_attributes_as_an_iso_8601_string(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve()
+        provider = provide(server)
+        api.set_provider_and_wait(provider)
+        attributes = cast("dict[str, TrackingValue]", {"ends_on": datetime(2026, 12, 1, tzinfo=timezone.utc)})
+
+        api.get_client().track(
+            "trial-started", tracking_event_details=TrackingEventDetails(attributes=attributes)
+        )
+
+        entries = self.entries_sent_on_shutdown(provider, server)
+        assert entries[0]["details"] == {"ends_on": "2026-12-01T00:00:00+00:00"}
+
+    def test_reports_an_event_for_the_context_set_on_the_openfeature_client(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve()
+        provider = provide(server)
+        api.set_provider_and_wait(provider)
+        client = api.get_client()
+        client.context = EvaluationContext("user-7")
+
+        client.track("checkout-completed")
+
+        assert self.entries_sent_on_shutdown(provider, server)[0]["contextIdentifier"] == "user-7"
+
+    def test_withholds_the_targeting_key_of_a_context_marked_anonymous(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve()
+        provider = provide(server)
+        api.set_provider_and_wait(provider)
+
+        api.get_client().track("checkout-completed", EvaluationContext("visitor-7", {"anonymous": True}))
+
+        assert self.entries_sent_on_shutdown(provider, server) == [{"name": "checkout-completed"}]
+
+    def test_reports_an_event_without_attributes_that_cannot_be_written_and_logs_a_warning(
+        self, serve: ServerFactory, provide: ProviderFactory, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        server = serve()
+        provider = provide(server)
+        api.set_provider_and_wait(provider)
+        circular: dict[str, Any] = {}
+        circular["self"] = circular
+
+        api.get_client().track(
+            "checkout-completed", tracking_event_details=TrackingEventDetails(attributes=circular)
+        )
+
+        assert self.entries_sent_on_shutdown(provider, server) == [{"name": "checkout-completed"}]
+        assert [record.levelname for record in caplog.records] == ["WARNING"]
+
+    def test_does_not_raise_and_logs_a_warning_when_the_evaluation_context_cannot_be_read(
+        self, serve: ServerFactory, provide: ProviderFactory, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        server = serve()
+        provider = provide(server)
+        api.set_provider_and_wait(provider)
+        circular: dict[str, Any] = {}
+        circular["self"] = circular
+
+        api.get_client().track("checkout-completed", EvaluationContext("user-1", {"traits": circular}))
+        provider.shutdown()
+
+        assert server.requests_to(TELEMETRY_PATH) == []
+        assert [record.levelname for record in caplog.records] == ["WARNING"]

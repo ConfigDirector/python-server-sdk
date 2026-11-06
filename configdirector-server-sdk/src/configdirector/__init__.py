@@ -47,6 +47,8 @@ from .types import (
     Metadata,
     Subscription,
     TelemetryOptions,
+    TrackedEventDetails,
+    TrackedEventDetailValue,
     Variation,
     WatchHandler,
 )
@@ -78,6 +80,8 @@ __all__ = [
     "Metadata",
     "Subscription",
     "TelemetryOptions",
+    "TrackedEventDetailValue",
+    "TrackedEventDetails",
     "Variation",
     "WatchHandler",
     "__version__",

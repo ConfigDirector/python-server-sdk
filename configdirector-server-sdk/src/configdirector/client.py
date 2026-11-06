@@ -6,6 +6,8 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
 from functools import partial
 from types import TracebackType
 from typing import Any, Literal, cast, overload
@@ -32,6 +34,7 @@ from ._telemetry import (
     TelemetryCollector,
     TelemetryCollectorOptions,
     TelemetryProtocol,
+    admit_tracked_event,
     value_id_for,
 )
 from ._transport import (
@@ -64,6 +67,7 @@ from .types import (
     Metadata,
     Subscription,
     TelemetryOptions,
+    TrackedEventDetails,
     WatchHandler,
 )
 
@@ -521,6 +525,36 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             key: self._evaluator.evaluate(config, evaluation_context, segments)
             for key, config in definitions.items()
         }
+
+    def track(
+        self,
+        event_name: str,
+        context: Context | None = None,
+        *,
+        value: int | float | Decimal | None = None,
+        details: TrackedEventDetails | None = None,
+    ) -> None:
+        if self.closed:
+            return
+
+        match self._plan:
+            case StayOffline():
+                return
+            case Connect():
+                try:
+                    self._telemetry.record_tracked_event(
+                        admit_tracked_event(
+                            name=event_name,
+                            context=self._context_to_evaluate(context),
+                            value=value,
+                            details=details,
+                            happened_at=datetime.now(timezone.utc),
+                        )
+                    )
+                except Exception as error:
+                    self._logger.warning(
+                        "A tracked event was not reported because it could not be read: %r", error
+                    )
 
     # -- watching ---------------------------------------------------------------------
 

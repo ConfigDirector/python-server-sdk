@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from types import TracebackType
 from typing import Any, Literal, Protocol, TypeVar, overload, runtime_checkable
 
@@ -31,6 +32,9 @@ __all__ = [
     "Metadata",
     "Subscription",
     "TelemetryOptions",
+    "TrackedEvent",
+    "TrackedEventDetailValue",
+    "TrackedEventDetails",
     "Variation",
     "WatchHandler",
 ]
@@ -79,6 +83,17 @@ config does not exist (``"config-state-missing"``), no values have arrived yet
 (``"type-mismatch"``, ``"invalid-number"``, ``"invalid-json"``, ``"invalid-boolean"``)."""
 
 
+TrackedEventDetailValue = (
+    str | int | float | bool | Sequence["TrackedEventDetailValue"] | Mapping[str, "TrackedEventDetailValue"]
+)
+"""A value in the details of a tracked event: a string, a number, a boolean, or a nested object or
+list of such values."""
+
+TrackedEventDetails = Mapping[str, TrackedEventDetailValue]
+"""Details of a tracked event, such as the plan a customer chose. Details with more than 20
+top-level keys, or larger than 1 KB as JSON, are left out and the event is still reported."""
+
+
 @dataclass(frozen=True, slots=True)
 class Context:
     """The user's context, used for targeting rule evaluation.
@@ -114,6 +129,23 @@ class Context:
     traits: dict[str, Any] | None = None
     anonymous: bool = False
     kind: str | None = field(default=None, kw_only=True)
+
+
+@dataclass(frozen=True, slots=True)
+class TrackedEvent:
+    """An event the code under test tracked, as a test client recorded it.
+
+    Attributes:
+        name: The name the event was tracked with.
+        context: The context the event was tracked for, if any.
+        value: The value the event was tracked with, when it is a finite number.
+        details: The details the event was tracked with, when they are within the limits.
+    """
+
+    name: str
+    context: Context | None = None
+    value: int | float | Decimal | None = None
+    details: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -568,6 +600,43 @@ class ConfigDirectorClient(Protocol):
             context: The user's context, used for targeting rule evaluation.
             config_keys: Restrict the result to these keys. When omitted, every known key is
                 returned.
+        """
+        ...
+
+    def track(
+        self,
+        event_name: str,
+        context: Context | None = None,
+        *,
+        value: int | float | Decimal | None = None,
+        details: TrackedEventDetails | None = None,
+    ) -> None:
+        """Report to ConfigDirector that something happened, such as a completed checkout, so it
+        can be counted. The event is sent with the next telemetry batch. ``track`` never raises,
+        and does nothing in offline mode or after :meth:`close`.
+
+        An event counts for an experiment only when it is tracked for a context with an ``id``,
+        the one the experiment's config was evaluated for. Without a context, or for a context
+        without an ``id``, the event is still reported. The ``id`` of a context marked
+        ``anonymous`` is not sent.
+
+        A telemetry batch holds at most 1,000 tracked events, and events beyond that are not
+        reported. Each cause of an event being dropped or sent without its value or details logs
+        one warning per telemetry batch.
+
+        Args:
+            event_name: The name of the event, 1 to 150 characters. An event with any other name
+                is not reported.
+            context: The context the event happened for. When its kind is invalid, the SDK logs
+                an error as it does for an evaluation and sends the event without a context.
+            value: A number the event measures, such as an amount of money, a count or a
+                duration. ConfigDirector stores it as an exact decimal, and a ``Decimal`` is sent
+                with every digit. A value that is not a finite number is left out and the event
+                is still reported.
+            details: Details of the event, whose values are strings, numbers, booleans, or nested
+                objects and lists. Details with more than 20 top-level keys, larger than 1 KB as
+                JSON, or holding any other type of value are left out and the event is still
+                reported.
         """
         ...
 

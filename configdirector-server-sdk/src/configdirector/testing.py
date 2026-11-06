@@ -25,9 +25,9 @@ from collections.abc import Mapping
 from types import TracebackType
 
 from ._in_memory_connection import InMemoryConnection
-from .types import ConfigDirectorClient, ConfigDirectorLogger, ConfigValue
+from .types import ConfigDirectorClient, ConfigDirectorLogger, ConfigValue, TrackedEvent
 
-__all__ = ["TestClient", "create_test_client"]
+__all__ = ["TestClient", "TrackedEvent", "create_test_client"]
 
 
 class TestClient:
@@ -58,6 +58,16 @@ class TestClient:
         the stored values unless initialization is held or armed to fail.
         """
         return self._connection.client
+
+    @property
+    def tracked_events(self) -> list[TrackedEvent]:
+        """Every event the code under test tracked through the client, in call order, as the SDK
+        would report it: an event whose name does not have 1 to 150 characters is not recorded, and
+        a value or details the SDK would leave out are missing from the record. A context whose
+        kind is invalid is not recorded with its event. The limit of 1,000 events per telemetry
+        batch does not apply.
+        """
+        return self._connection.tracked_events
 
     def set_value(self, key: str, value: ConfigValue) -> None:
         """Store ``value`` under ``key`` and, when the client is connected, deliver it as an
@@ -157,6 +167,8 @@ def create_test_client(
             held ``initialize`` waits. Defaults to the SDK's production timeout.
         logger: Where the SDK client writes. Defaults to the standard library logger named
             ``"configdirector"``, as for a production client, so pytest's ``caplog`` captures it.
+            Since the test client sends no telemetry, every tracked event that is not recorded as
+            it was tracked logs a warning, rather than each cause once per telemetry batch.
 
     Returns:
         A test client whose :attr:`TestClient.client` has not been initialized yet.

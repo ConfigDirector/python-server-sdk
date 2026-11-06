@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..types import ConfigType, ConfigValue, Context, EvaluationReason
 from .queue import InvalidContextRecording
+from .tracked_events import TrackedEventAdmission
 
 __all__ = ["DiscardingTelemetry"]
 
@@ -26,6 +27,9 @@ class DiscardingTelemetry:
 
     def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording:
         return "new-kind-sample"
+
+    def record_tracked_event(self, admission: TrackedEventAdmission) -> None:
+        return None
 
     def close(self) -> None:
         return None

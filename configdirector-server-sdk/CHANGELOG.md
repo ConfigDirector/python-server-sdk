@@ -10,6 +10,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `track(event_name, context=None, *, value=None, details=None)` on the client reports to
+  ConfigDirector that something happened, such as a completed checkout, so ConfigDirector can show
+  it on the live feed and count it for each variation of a running experiment. `value` is a number
+  of any kind, such as an amount of money, a count or a duration: an `int`, a `float` or a
+  `Decimal`, which is sent with every digit. `details` is a mapping whose values are strings,
+  numbers, booleans, or nested mappings and lists. The new `TrackedEventDetails` and
+  `TrackedEventDetailValue` types are exported.
+- An event counts for an experiment only when it is tracked for a context with an `id`, the one the
+  experiment's config was evaluated for. Without a context, or for a context without an `id`, the
+  event is still reported. The `id` of a context marked `anonymous` is not sent. When a context's
+  kind is invalid, the SDK logs an error as it does for an evaluation and sends the event without a
+  context.
+- Tracked events are sent with the next telemetry batch, at most 1,000 per batch; events beyond that
+  are not reported. An event whose name does not have 1 to 150 characters is not reported. Details
+  with more than 20 top-level keys, larger than 1 KB as JSON, or holding any other type of value,
+  and a `value` that is not a finite number, are left out and the event is still reported. Each of
+  these logs one warning per telemetry batch. `track` never raises, and does nothing in `offline`
+  mode or after `close`.
+- The test client from `configdirector.testing` records the events the code under test tracked in
+  `test_client.tracked_events`, in call order, as `TrackedEvent(name, context, value, details)`. An
+  event whose name the SDK would not report is not recorded, and a value or details the SDK would
+  leave out are missing from the record. The limit of 1,000 events per telemetry batch does not
+  apply to the record. The new `TrackedEvent` type is exported from `configdirector.testing`.
 - `evaluate(config_key, default, context=None)` on the client returns a `ConfigEvaluation`: the
   value, the reason it was served, its value ID and its variation. Its `value` is what `get_value`
   returns, and like every read it fires `config_evaluated` and is counted in telemetry.
@@ -33,8 +56,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   served the rollout's first share. Give an anonymous context a stable `id`, such as a session or
   device ID, to keep it in a rollout. A rule that serves a single value still applies to a context
   without an `id`.
-- `ConfigDirectorClient` has a new method, `evaluate`, so a class of your own that implements it,
-  such as a fake in your tests, needs one too.
+- `ConfigDirectorClient` has two new methods, `evaluate` and `track`, so a class of your own that
+  implements it, such as a fake in your tests, needs them too.
+- Telemetry reports now write text outside ASCII as UTF-8 rather than as escape sequences, so they
+  are smaller.
+
+### Fixed
+
+- A telemetry report larger than ConfigDirector accepts is now discarded with a warning, and the
+  next report is still sent. Before, the SDK stopped sending telemetry until the process restarted.
+- A telemetry report holding text that UTF-8 cannot represent, such as an unpaired surrogate in a
+  context `id`, is now sent with a replacement character in its place.
 
 ## [1.8.1] - 2026-10-28
 

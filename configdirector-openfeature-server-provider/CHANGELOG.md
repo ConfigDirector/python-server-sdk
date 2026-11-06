@@ -8,6 +8,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- The provider now implements OpenFeature's tracking. `client.track(event_name, context, details)`
+  reports to ConfigDirector that something happened, such as a completed checkout, so ConfigDirector
+  can show it on the live feed and count it for each variation of a running experiment. Before, a
+  `track` call did nothing. The details' `value` is sent as the event's value, their other attributes
+  as the event's details, and the `targeting_key` (or `id` attribute) and `kind` of the merged
+  evaluation context as the context the event happened for.
+- An event counts for an experiment only when its evaluation context has the `targeting_key` the
+  experiment's flag was evaluated with. Without one, the event is still reported. The
+  `targeting_key` of a context marked `anonymous` is not sent.
+- Tracked events are sent with the next telemetry batch, at most 1,000 per batch; events beyond that
+  are not reported. An event whose name does not have 1 to 150 characters is not reported. Details
+  with more than 20 top-level keys or larger than 1 KB as JSON, and a `value` that is not a finite
+  number, are left out and the event is still reported. Each of these logs one warning per telemetry
+  batch. `track` never raises, and does nothing in `offline` mode.
 - The evaluation counts the provider sends to ConfigDirector now say which variation was served,
   and which percentage rollout and share served it, so ConfigDirector can count the contexts each
   variation of an experiment reached.
@@ -25,6 +39,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   rollout's first share. Give an anonymous context a stable `targeting_key`, such as a session ID,
   to keep it in a rollout. A rule that serves a single value still applies to a context without
   one.
+- Telemetry reports now write text outside ASCII as UTF-8 rather than as escape sequences, so they
+  are smaller.
+
+### Fixed
+
+- A telemetry report larger than ConfigDirector accepts is now discarded with a warning, and the
+  next report is still sent. Before, the provider stopped sending telemetry until the process
+  restarted.
+- A telemetry report holding text that UTF-8 cannot represent, such as an unpaired surrogate in a
+  targeting key, is now sent with a replacement character in its place.
 
 ## [1.7.0] - 2026-10-28
 

@@ -13,6 +13,7 @@ from .._version import SdkIdentity
 from ..errors import ConfigDirectorConnectionError, ConfigDirectorValidationError
 from ..types import ConfigDirectorLogger, Context
 from .queue import AggregatedEvent, InvalidContextEntry
+from .tracked_events import TrackedEventEntry, number_as_json
 
 __all__ = [
     "REQUEST_TIMEOUT",
@@ -23,6 +24,7 @@ __all__ = [
 ]
 
 _PATH = "server/telemetry/v1"
+_REPORT_TOO_LARGE_STATUS = 413
 
 # Telemetry is best-effort background work, so it waits a good deal less than the transport does
 # before giving up on a request and letting the next flush carry the events instead.
@@ -36,6 +38,7 @@ class EventReport:
     contexts: list[Context]
     dropped_contexts: int
     invalid_contexts: list[InvalidContextEntry] = field(default_factory=list)
+    tracked_events: list[TrackedEventEntry] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
@@ -43,6 +46,7 @@ class EventReport:
             not self.evaluations
             and not self.contexts
             and not self.invalid_contexts
+            and not self.tracked_events
             and self.dropped_evaluations == 0
             and self.dropped_contexts == 0
         )
@@ -86,18 +90,26 @@ class HttpEventReporter:
         if report.is_empty:
             return ReporterResponse(success=True)
 
-        response = self._send(json.dumps(self._payload(report)).encode("utf-8"))
+        response = self._send(self._body(report))
         if response.fatal:
             self._send_requests = False
         return response
 
-    def _payload(self, report: EventReport) -> dict[str, Any]:
+    def _body(self, report: EventReport) -> bytes:
+        tracked_events = ",".join(_tracked_event_to_json(entry) for entry in report.tracked_events)
+        discrete_events = _with_leading_member(
+            "trackedEvents",
+            f"[{tracked_events}]",
+            _to_json({"capturedContexts": [_context_to_wire(context) for context in report.contexts]}),
+        )
+        return _with_leading_member(
+            "discreteEvents", discrete_events, _to_json(self._payload_without_discrete_events(report))
+        ).encode("utf-8", "replace")
+
+    def _payload_without_discrete_events(self, report: EventReport) -> dict[str, Any]:
         return {
             "serverSdkKey": self._server_sdk_key,
             "metaContext": dict(self._meta_context),
-            "discreteEvents": {
-                "capturedContexts": [_context_to_wire(context) for context in report.contexts]
-            },
             "aggregatedEvents": {
                 "evaluatedConfig": [_aggregated_to_wire(event) for event in report.evaluations],
                 "invalidContext": [_invalid_context_to_wire(entry) for entry in report.invalid_contexts],
@@ -123,7 +135,7 @@ class HttpEventReporter:
             self._logger.warning("[EventReporter] Error attempting to send telemetry data: %r", error)
             return ReporterResponse(success=False)
 
-        if is_fatal_status(response.status):
+        if _stops_reporting(response.status):
             self._logger.warning(
                 "[EventReporter] Received a fatal status response (%s) from the telemetry "
                 "endpoint. No more telemetry data will be sent.",
@@ -141,6 +153,10 @@ class HttpEventReporter:
             )
 
         return ReporterResponse(success=response.ok)
+
+
+def _stops_reporting(status: int | None) -> bool:
+    return is_fatal_status(status) and status != _REPORT_TOO_LARGE_STATUS
 
 
 def _aggregated_to_wire(aggregated: AggregatedEvent) -> dict[str, Any]:
@@ -173,6 +189,30 @@ def _context_to_wire(context: Context) -> dict[str, Any]:
     if context.traits is not None:
         wire["traits"] = context.traits
     return wire
+
+
+def _tracked_event_to_json(entry: TrackedEventEntry) -> str:
+    wire: dict[str, Any] = {"name": entry.name, "happenedAt": _timestamp(entry.happened_at)}
+    if entry.context_kind is not None:
+        wire["contextKind"] = entry.context_kind
+    if entry.context_identifier is not None:
+        wire["contextIdentifier"] = entry.context_identifier
+    if entry.details is not None:
+        wire["details"] = entry.details
+    value_as_json = number_as_json(entry.value)
+    return (
+        _to_json(wire)
+        if value_as_json is None
+        else _with_leading_member("value", value_as_json, _to_json(wire))
+    )
+
+
+def _to_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _with_leading_member(name: str, value_as_json: str, json_object: str) -> str:
+    return f'{{"{name}":{value_as_json},{json_object[1:]}'
 
 
 def _timestamp(moment: datetime) -> str:

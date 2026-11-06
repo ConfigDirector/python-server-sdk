@@ -24,6 +24,7 @@ from configdirector._telemetry import (
     TelemetryCollector,
     TelemetryCollectorOptions,
 )
+from configdirector._telemetry.tracked_events import TrackedEventAdmission
 from configdirector._transport import TransportOptions
 from configdirector.client import _ConfigDirectorClient
 from configdirector.types import (
@@ -192,6 +193,7 @@ class FakeTelemetryCollector:
         self.options = options
         self.evaluations: list[RecordedEvaluation] = []
         self.invalid_kind_samples: list[str] = []
+        self.tracked_event_admissions: list[TrackedEventAdmission] = []
         self.closed = False
 
     def record_evaluation(
@@ -228,6 +230,9 @@ class FakeTelemetryCollector:
     def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording:
         self.invalid_kind_samples.append(kind_sample)
         return "new-kind-sample"
+
+    def record_tracked_event(self, admission: TrackedEventAdmission) -> None:
+        self.tracked_event_admissions.append(admission)
 
     def flush(self) -> None:
         pass

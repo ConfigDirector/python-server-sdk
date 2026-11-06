@@ -10,7 +10,14 @@ from ._bundle import BundleKind, ConfigBundle
 from ._evaluation import Config
 from ._logger import get_default_logger
 from ._native_values import unconditional_config
-from ._telemetry import DiscardingTelemetry, TelemetryCollectorOptions
+from ._telemetry import (
+    TRACKED_EVENT_WARNING_MESSAGES,
+    DiscardingTelemetry,
+    TelemetryCollectorOptions,
+    TrackedEventAdmission,
+    TrackedEventAdmitted,
+    TrackedEventDropped,
+)
 from ._transport import TransportOptions
 from ._transport.base import fatal_status_error
 from ._validation import validate_config_key
@@ -20,6 +27,7 @@ from .types import (
     ConfigDirectorLogger,
     ConfigValue,
     ConnectionOptions,
+    TrackedEvent,
 )
 
 __all__ = ["InMemoryConnection"]
@@ -61,13 +69,14 @@ class InMemoryConnection:
         self._delivery_lock = threading.Lock()
         self._pending: deque[ConfigBundle] = deque()
         self._delivering = False
+        self.tracked_events: list[TrackedEvent] = []
         connection = ConnectionOptions() if timeout is None else ConnectionOptions(timeout=timeout)
         self.client: ConfigDirectorClient = _ConfigDirectorClient(
             _TEST_CLIENT_SDK_KEY,
             connection=connection,
             logger=self._logger,
             transport_factory=self._create_transport,
-            telemetry_factory=_discarding_telemetry,
+            telemetry_factory=self._create_telemetry,
         )
 
     @property
@@ -125,6 +134,9 @@ class InMemoryConnection:
     def _create_transport(self, options: TransportOptions) -> _Attempts:
         self._on_bundle = options.on_bundle
         return _Attempts(self)
+
+    def _create_telemetry(self, options: TelemetryCollectorOptions) -> _TrackedEventRecordingTelemetry:
+        return _TrackedEventRecordingTelemetry(self._logger, self.tracked_events)
 
     def _connect(self, timeout: float) -> None:
         attempt: _HeldAttempt | None = None
@@ -217,8 +229,21 @@ class _Attempts:
         self._connection._close_transport()
 
 
-def _discarding_telemetry(options: TelemetryCollectorOptions) -> DiscardingTelemetry:
-    return DiscardingTelemetry()
+class _TrackedEventRecordingTelemetry(DiscardingTelemetry):
+    def __init__(self, logger: ConfigDirectorLogger, tracked_events: list[TrackedEvent]) -> None:
+        self._logger = logger
+        self._tracked_events = tracked_events
+
+    def record_tracked_event(self, admission: TrackedEventAdmission) -> None:
+        for warning in admission.warnings:
+            self._logger.warning(TRACKED_EVENT_WARNING_MESSAGES[warning])
+        match admission:
+            case TrackedEventDropped():
+                return
+            case TrackedEventAdmitted(entry=entry, context=context):
+                self._tracked_events.append(
+                    TrackedEvent(name=entry.name, context=context, value=entry.value, details=entry.details)
+                )
 
 
 def _bundle(configs: dict[str, Config], kind: BundleKind) -> ConfigBundle:

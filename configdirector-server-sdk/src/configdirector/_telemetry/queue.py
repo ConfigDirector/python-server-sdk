@@ -8,6 +8,14 @@ from typing import Literal
 
 from ..types import Context
 from .events import EvaluatedConfigEvent
+from .tracked_events import (
+    TRACKED_EVENTS_PER_BATCH,
+    TrackedEventAdmission,
+    TrackedEventAdmitted,
+    TrackedEventDropped,
+    TrackedEventEntry,
+    TrackedEventWarning,
+)
 
 __all__ = [
     "KIND_SAMPLE_LIMIT",
@@ -18,6 +26,7 @@ __all__ = [
     "InvalidContextEntry",
     "InvalidContextRecording",
     "InvalidContextSubmissions",
+    "TrackedEventQueue",
     "aggregate",
 ]
 
@@ -184,6 +193,51 @@ class InvalidContextSubmissions:
         self._counts_by_kind_sample.clear()
         self._count_beyond_sample_limit = 0
         self._start_time = None
+
+
+class TrackedEventQueue:
+    def __init__(self) -> None:
+        self._entries: list[TrackedEventEntry] = []
+        self._warnings_raised_this_batch: set[TrackedEventWarning] = set()
+        self._lock = threading.Lock()
+
+    def add(self, admission: TrackedEventAdmission) -> list[TrackedEventWarning]:
+        with self._lock:
+            return [
+                warning
+                for warning in self._warnings_of_keeping(admission)
+                if self._is_first_this_batch(warning)
+            ]
+
+    def take_batch(self) -> list[TrackedEventEntry]:
+        with self._lock:
+            batch = self._entries
+            self._reset()
+            return batch
+
+    def clear(self) -> None:
+        with self._lock:
+            self._reset()
+
+    def _warnings_of_keeping(self, admission: TrackedEventAdmission) -> tuple[TrackedEventWarning, ...]:
+        match admission:
+            case TrackedEventDropped(warnings=warnings):
+                return warnings
+            case TrackedEventAdmitted(entry=entry, warnings=warnings):
+                if len(self._entries) >= TRACKED_EVENTS_PER_BATCH:
+                    return ("batch-already-full",)
+                self._entries.append(entry)
+                return warnings
+
+    def _is_first_this_batch(self, warning: TrackedEventWarning) -> bool:
+        if warning in self._warnings_raised_this_batch:
+            return False
+        self._warnings_raised_this_batch.add(warning)
+        return True
+
+    def _reset(self) -> None:
+        self._entries = []
+        self._warnings_raised_this_batch = set()
 
 
 def aggregate(
