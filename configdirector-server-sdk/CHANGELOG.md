@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- A `datetime` inside the `details` of `track`, at any depth, is now sent as ISO 8601 text, keeping
+  its UTC offset if it has one, and counts toward the 1 KB limit as that text. Before, the details
+  were left out with a warning. `TrackedEventDetailValue` now includes `datetime`, and the test
+  client's `tracked_events` holds the text. A plain `date`, a `Decimal` and any other type of value
+  still leave the details out with the warning.
+
 ## [1.9.0] - 2026-11-06
 
 ### Added

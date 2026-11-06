@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from types import TracebackType
 from typing import Any, Literal, Protocol, TypeVar, overload, runtime_checkable
@@ -84,10 +85,16 @@ config does not exist (``"config-state-missing"``), no values have arrived yet
 
 
 TrackedEventDetailValue = (
-    str | int | float | bool | Sequence["TrackedEventDetailValue"] | Mapping[str, "TrackedEventDetailValue"]
+    str
+    | int
+    | float
+    | bool
+    | datetime
+    | Sequence["TrackedEventDetailValue"]
+    | Mapping[str, "TrackedEventDetailValue"]
 )
-"""A value in the details of a tracked event: a string, a number, a boolean, or a nested object or
-list of such values."""
+"""A value in the details of a tracked event: a string, a number, a boolean, a ``datetime``, which
+is sent as ISO 8601 text, or a nested object or list of such values."""
 
 TrackedEventDetails = Mapping[str, TrackedEventDetailValue]
 """Details of a tracked event, such as the plan a customer chose. Details with more than 20
@@ -139,7 +146,8 @@ class TrackedEvent:
         name: The name the event was tracked with.
         context: The context the event was tracked for, if any.
         value: The value the event was tracked with, when it is a finite number.
-        details: The details the event was tracked with, when they are within the limits.
+        details: The details the event was tracked with, when they are within the limits, as the
+            SDK would report them: a ``datetime`` is held as its ISO 8601 text.
     """
 
     name: str
@@ -633,10 +641,11 @@ class ConfigDirectorClient(Protocol):
                 duration. ConfigDirector stores it as an exact decimal, and a ``Decimal`` is sent
                 with every digit. A value that is not a finite number is left out and the event
                 is still reported.
-            details: Details of the event, whose values are strings, numbers, booleans, or nested
-                objects and lists. Details with more than 20 top-level keys, larger than 1 KB as
-                JSON, or holding any other type of value are left out and the event is still
-                reported.
+            details: Details of the event, whose values are strings, numbers, booleans, ``datetime``
+                values, or nested objects and lists. A ``datetime`` is sent as ISO 8601 text,
+                keeping its UTC offset if it has one, and counts toward the size as that text.
+                Details with more than 20 top-level keys, larger than 1 KB as JSON, or holding any
+                other type of value are left out and the event is still reported.
         """
         ...
 

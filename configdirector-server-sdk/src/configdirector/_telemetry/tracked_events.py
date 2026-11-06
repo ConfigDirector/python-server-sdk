@@ -138,7 +138,7 @@ def _json_copy_within_the_limits(details: object) -> dict[str, Any] | None:
     if not isinstance(details, Mapping):
         return None
     try:
-        written_details = to_compact_json(_with_plain_containers(details))
+        written_details = to_compact_json(_json_form_of(details))
         if len(written_details.encode("utf-8")) > _DETAILS_MAXIMUM_JSON_BYTES:
             return None
         copy: dict[str, Any] = json.loads(written_details)
@@ -147,11 +147,13 @@ def _json_copy_within_the_limits(details: object) -> dict[str, Any] | None:
     return copy if len(copy) <= _DETAILS_MAXIMUM_TOP_LEVEL_KEYS else None
 
 
-def _with_plain_containers(value: Any) -> Any:
+def _json_form_of(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return {key: _with_plain_containers(member) for key, member in value.items()}
+        return {key: _json_form_of(member) for key, member in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_with_plain_containers(item) for item in value]
+        return [_json_form_of(item) for item in value]
+    if isinstance(value, datetime):
+        return value.isoformat()
     return value
 
 

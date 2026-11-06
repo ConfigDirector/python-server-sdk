@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -810,6 +811,19 @@ class TestTrackedEvents:
         test_client.client.track("checkout-completed", value=Decimal("49.90"))
 
         assert str(test_client.tracked_events[0].value) == "49.90"
+
+    def test_records_a_datetime_inside_details_as_the_text_the_sdk_would_report(
+        self, create: Callable[..., TestClient]
+    ) -> None:
+        test_client = create()
+
+        test_client.client.track(
+            "trial-started", details={"ends_at": datetime(2026, 12, 1, tzinfo=timezone.utc)}
+        )
+
+        assert test_client.tracked_events == [
+            TrackedEvent(name="trial-started", details={"ends_at": "2026-12-01T00:00:00+00:00"})
+        ]
 
     def test_does_not_record_an_event_whose_name_has_151_characters_and_logs_a_warning(
         self, create: Callable[..., TestClient], logger: RecordingLogger

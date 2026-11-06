@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Any, cast
@@ -464,10 +464,90 @@ class TestDetails:
         assert [without_the_time(entry) for entry in entries] == [{"name": "checkout-completed"}]
         assert len(logger.messages("warning")) == 1
 
-    def test_leaves_out_details_holding_a_date_sends_the_event_and_logs_a_warning(
+    def test_sends_a_datetime_inside_details_as_iso_text_and_logs_no_warning(
         self, client: _ConfigDirectorClient, http: StubHttp, logger: RecordingLogger
     ) -> None:
-        details = cast(dict[str, Any], {"ends_on": datetime(2026, 12, 1, tzinfo=timezone.utc)})
+        client.track("trial-started", details={"ends_at": datetime(2026, 12, 1, tzinfo=timezone.utc)})
+
+        client.close()
+
+        assert b'"details":{"ends_at":"2026-12-01T00:00:00+00:00"}' in http.calls[-1].body
+        assert logger.messages("warning") == []
+
+    def test_sends_a_datetime_nested_in_a_mapping_as_text(
+        self, client: _ConfigDirectorClient, http: StubHttp
+    ) -> None:
+        client.track(
+            "trial-started",
+            details={"trial": {"ends_at": datetime(2026, 12, 1, tzinfo=timezone.utc)}},
+        )
+
+        entries = entries_sent_on_close(client, http)
+
+        assert entries[0]["details"] == {"trial": {"ends_at": "2026-12-01T00:00:00+00:00"}}
+
+    def test_sends_a_datetime_nested_in_a_list_as_text(
+        self, client: _ConfigDirectorClient, http: StubHttp
+    ) -> None:
+        client.track(
+            "reminders-scheduled",
+            details={"reminders": [datetime(2026, 12, 1, tzinfo=timezone.utc)]},
+        )
+
+        entries = entries_sent_on_close(client, http)
+
+        assert entries[0]["details"] == {"reminders": ["2026-12-01T00:00:00+00:00"]}
+
+    def test_sends_a_datetime_with_the_offset_it_has(
+        self, client: _ConfigDirectorClient, http: StubHttp
+    ) -> None:
+        ends_at = datetime(2026, 12, 1, 9, 30, tzinfo=timezone(timedelta(hours=-5)))
+
+        client.track("trial-started", details={"ends_at": ends_at})
+
+        entries = entries_sent_on_close(client, http)
+
+        assert entries[0]["details"] == {"ends_at": "2026-12-01T09:30:00-05:00"}
+
+    def test_sends_a_datetime_without_an_offset_as_text_without_one(
+        self, client: _ConfigDirectorClient, http: StubHttp
+    ) -> None:
+        client.track("trial-started", details={"ends_at": datetime(2026, 12, 1, 9, 30)})
+
+        entries = entries_sent_on_close(client, http)
+
+        assert entries[0]["details"] == {"ends_at": "2026-12-01T09:30:00"}
+
+    def test_sends_details_holding_a_datetime_at_exactly_1024_bytes_measured_on_the_text(
+        self, client: _ConfigDirectorClient, http: StubHttp, logger: RecordingLogger
+    ) -> None:
+        client.track(
+            "trial-started",
+            details={"note": "a" * 975, "ends_at": datetime(2026, 12, 1, tzinfo=timezone.utc)},
+        )
+
+        entries = entries_sent_on_close(client, http)
+
+        assert entries[0]["details"] == {"note": "a" * 975, "ends_at": "2026-12-01T00:00:00+00:00"}
+        assert logger.messages("warning") == []
+
+    def test_leaves_out_details_a_datetime_takes_to_1025_bytes_measured_on_the_text(
+        self, client: _ConfigDirectorClient, http: StubHttp, logger: RecordingLogger
+    ) -> None:
+        client.track(
+            "trial-started",
+            details={"note": "a" * 976, "ends_at": datetime(2026, 12, 1, tzinfo=timezone.utc)},
+        )
+
+        entries = entries_sent_on_close(client, http)
+
+        assert [without_the_time(entry) for entry in entries] == [{"name": "trial-started"}]
+        assert len(logger.messages("warning")) == 1
+
+    def test_leaves_out_details_holding_a_plain_date_sends_the_event_and_logs_a_warning(
+        self, client: _ConfigDirectorClient, http: StubHttp, logger: RecordingLogger
+    ) -> None:
+        details = cast(dict[str, Any], {"ends_on": date(2026, 12, 1)})
 
         client.track("trial-started", details=details)
 
