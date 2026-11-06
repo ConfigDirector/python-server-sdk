@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from .._context_kind import effective_kind
-from ..types import ConfigDirectorLogger, ConfigState
+from ..types import ConfigDirectorLogger, ConfigState, Variation
 from ._json_value import to_json_string
 from .condition_evaluator import evaluate_condition
-from .percent_hashing import PERCENTAGE_WITHOUT_IDENTIFIER, assign_percentage
+from .percent_hashing import assign_percentage
 from .segment_evaluator import evaluate_segment_condition
 from .types import (
     Condition,
@@ -25,15 +26,38 @@ __all__ = ["ConfigEvaluator"]
 # Rules without an explicit order evaluate last, in the order the server sent them.
 _LAST = float("inf")
 
+_ServingReason = Literal["found-match", "rollout-skipped-no-identifier"]
+
 
 @dataclass(frozen=True, slots=True)
-class _RuleResult:
-    matched: bool
-    value: str = ""
-    value_id: str | None = None
+class _ServedValue:
+    value: str
+    value_id: str | None
+    variation_id: str | None
+    rule_id: str | None = None
+    share_id: str | None = None
 
 
-_NO_MATCH = _RuleResult(matched=False)
+@dataclass(frozen=True, slots=True)
+class _RuleNotMatched:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class _RolloutSkippedNoIdentifier:
+    pass
+
+
+_RuleServing = _ServedValue | _RuleNotMatched | _RolloutSkippedNoIdentifier
+
+_NOT_MATCHED = _RuleNotMatched()
+_ROLLOUT_SKIPPED_NO_IDENTIFIER = _RolloutSkippedNoIdentifier()
+
+
+@dataclass(frozen=True, slots=True)
+class _ServedConfig:
+    state: ConfigState
+    reason: _ServingReason
 
 
 class ConfigEvaluator:
@@ -46,41 +70,41 @@ class ConfigEvaluator:
         context: EvaluationContext | None = None,
         segments: Segments | None = None,
     ) -> ConfigState:
-        value, value_id = self._get_config_value(config, context, segments)
-        return ConfigState(
-            id=config.id,
-            key=config.key,
-            type=config.type,
-            value=value,
-            value_id=value_id,
-        )
+        return self.evaluate_with_reason(config, context, segments).state
 
-    # Returns the selected value together with the server's ID for it. The two travel as a pair
-    # because which rule produced the value is the only thing that says which ID belongs to it.
-    def _get_config_value(
-        self, config: Config, context: EvaluationContext | None, segments: Segments | None
-    ) -> tuple[str | None, str | None]:
+    def evaluate_with_reason(
+        self,
+        config: Config,
+        context: EvaluationContext | None = None,
+        segments: Segments | None = None,
+    ) -> _ServedConfig:
         rules = sorted(
             config.target.rules,
             key=lambda rule: _LAST if rule.order is None else rule.order,
         )
         for rule in rules:
-            result = self._evaluate_rule(rule, config, context, segments)
-            if result.matched:
-                return result.value, result.value_id
+            match self._evaluate_rule(rule, config, context, segments):
+                case _ServedValue() as served_value:
+                    return _served_config(config, served_value, "found-match")
+                case _RolloutSkippedNoIdentifier():
+                    return _served_config(
+                        config, _default_targeting_rule_value(config), "rollout-skipped-no-identifier"
+                    )
+                case _RuleNotMatched():
+                    pass
 
-        return config.target.default_value, config.target.default_value_id
+        return _served_config(config, _default_targeting_rule_value(config), "found-match")
 
     def _evaluate_rule(
         self, rule: Rule, config: Config, context: EvaluationContext | None, segments: Segments | None
-    ) -> _RuleResult:
+    ) -> _RuleServing:
         try:
             # Gated on the wire value as well as the Python type, so that a rule kind this version
             # of the SDK does not know about is skipped instead of crashing. The isinstance is what
             # makes the narrowing checked: a wire kind that disagrees with the object it was parsed
             # into is skipped too, rather than reaching a field it may not have.
             if rule.type == "percentage" and isinstance(rule, PercentageRule):
-                return self._evaluate_percentage(rule.percentages, config, context)
+                return self._evaluate_percentage(rule, config, context)
             if rule.type == "conditional" and isinstance(rule, ConditionalRule):
                 return self._evaluate_conditional_rule(rule, config, context, segments)
         except Exception as error:  # malformed rule data must not break the evaluation
@@ -92,36 +116,42 @@ class ConfigEvaluator:
                 error,
             )
 
-        return _NO_MATCH
+        return _NOT_MATCHED
 
     def _evaluate_percentage(
         self,
-        percentages: list[Percentage],
+        rule: Rule,
         config: Config,
         context: EvaluationContext | None,
-    ) -> _RuleResult:
-        supplied = context.context if context is not None else None
-        identifier = supplied.id if supplied is not None else None
-        assigned = (
-            PERCENTAGE_WITHOUT_IDENTIFIER
-            if identifier is None
-            else assign_percentage(config.id, identifier, effective_kind(supplied))
-        )
+    ) -> _RuleServing:
+        if rule.percentages is None:
+            return _NOT_MATCHED
+        supplied_context = context.context if context is not None else None
+        identifier = supplied_context.id if supplied_context is not None else None
+        if identifier is None:
+            return _ROLLOUT_SKIPPED_NO_IDENTIFIER
+        assigned_percentage = assign_percentage(config.id, identifier, effective_kind(supplied_context))
 
         bucket: Percentage | None = None
         total = 0.0
         # A bucket spans [total, total + percentage). Strict, so a context landing exactly on a
         # boundary belongs to the bucket that starts there -- which is what keeps a 0% bucket
         # unreachable and each bucket's share exact. See SEMANTICS.md 7.1.
-        for percentage in percentages:
-            if assigned < percentage.percentage + total:
+        for percentage in rule.percentages:
+            if assigned_percentage < percentage.percentage + total:
                 bucket = percentage
                 break
             total += percentage.percentage
 
-        if bucket is not None and bucket.value is not None:
-            return _RuleResult(matched=True, value=to_json_string(bucket.value), value_id=bucket.value_id)
-        return _NO_MATCH
+        if bucket is None or bucket.value is None:
+            return _NOT_MATCHED
+        return _ServedValue(
+            value=to_json_string(bucket.value),
+            value_id=bucket.value_id,
+            variation_id=bucket.variation_id,
+            rule_id=rule.id,
+            share_id=bucket.id,
+        )
 
     def _evaluate_conditional_rule(
         self,
@@ -129,14 +159,49 @@ class ConfigEvaluator:
         config: Config,
         context: EvaluationContext | None,
         segments: Segments | None,
-    ) -> _RuleResult:
+    ) -> _RuleServing:
         if not all(_condition_holds(condition, context, segments) for condition in rule.conditions or []):
-            return _NO_MATCH
+            return _NOT_MATCHED
         if rule.target == "value" and rule.value is not None:
-            return _RuleResult(matched=True, value=to_json_string(rule.value), value_id=rule.value_id)
+            return _ServedValue(
+                value=to_json_string(rule.value), value_id=rule.value_id, variation_id=rule.variation_id
+            )
         if rule.target == "percentage":
-            return self._evaluate_percentage(rule.percentages, config, context)
-        return _NO_MATCH
+            return self._evaluate_percentage(rule, config, context)
+        return _NOT_MATCHED
+
+
+def _default_targeting_rule_value(config: Config) -> _ServedValue:
+    return _ServedValue(
+        value=config.target.default_value,
+        value_id=config.target.default_value_id,
+        variation_id=config.target.default_variation_id,
+    )
+
+
+def _served_config(config: Config, served_value: _ServedValue, reason: _ServingReason) -> _ServedConfig:
+    return _ServedConfig(
+        state=ConfigState(
+            id=config.id,
+            key=config.key,
+            type=config.type,
+            value=served_value.value,
+            value_id=served_value.value_id,
+            variation=_variation_with_id(config, served_value.variation_id),
+            rule_id=served_value.rule_id,
+            share_id=served_value.share_id,
+        ),
+        reason=reason,
+    )
+
+
+def _variation_with_id(config: Config, variation_id: str | None) -> Variation | None:
+    if variation_id is None:
+        return None
+    for variation in config.variations:
+        if variation.id == variation_id:
+            return Variation(id=variation_id, name=variation.name or None)
+    return None
 
 
 def _condition_holds(

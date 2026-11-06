@@ -215,15 +215,188 @@ class TestResolution:
         assert details.error_code == ErrorCode.TYPE_MISMATCH
         assert "greeting" in (details.error_message or "")
 
-    def test_one_resolution_does_not_leak_into_the_next(
-        self, provider: ConfigDirectorProvider, monkeypatch: pytest.MonkeyPatch
+
+class TestVariations:
+    CONTROL_ID = "77777777-7777-4777-8777-777777777777"
+    TREATMENT_ID = "88888888-8888-4888-8888-888888888888"
+    UNNAMED_ID = "99999999-9999-4999-8999-999999999999"
+    ROLLOUT_RULE_ID = "22222222-2222-4222-8222-222222222222"
+    TREATMENT_SHARE_ID = "66666666-6666-4666-8666-666666666666"
+
+    def experiment(self) -> dict[str, Any]:
+        return {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "key": "checkout-cta-copy",
+            "type": "string",
+            "variations": [
+                {"id": self.CONTROL_ID, "name": "control", "value": "Start free trial"},
+                {"id": self.TREATMENT_ID, "name": "treatment", "value": "Try it free"},
+                {"id": self.UNNAMED_ID, "name": None, "value": "Get started"},
+            ],
+            "target": {
+                "defaultValue": "Start free trial",
+                "defaultValueId": "value-id-control",
+                "defaultVariationId": self.CONTROL_ID,
+                "rules": [
+                    {
+                        "id": "33333333-3333-4333-8333-333333333333",
+                        "order": 0,
+                        "type": "conditional",
+                        "target": "value",
+                        "value": "Get started",
+                        "valueId": "value-id-get-started",
+                        "variationId": self.UNNAMED_ID,
+                        "conditions": [
+                            {
+                                "id": "44444444-4444-4444-8444-444444444444",
+                                "attribute": "name",
+                                "operator": "equals",
+                                "targetType": "text",
+                                "targetValues": ["Ada Lovelace"],
+                            }
+                        ],
+                    },
+                    {
+                        "id": self.ROLLOUT_RULE_ID,
+                        "order": 1,
+                        "type": "percentage",
+                        "target": "percentage",
+                        "percentages": [
+                            {
+                                "id": self.TREATMENT_SHARE_ID,
+                                "percentage": 100,
+                                "value": "Try it free",
+                                "valueId": "value-id-treatment",
+                                "variationId": self.TREATMENT_ID,
+                            }
+                        ],
+                    },
+                ],
+            },
+        }
+
+    def test_resolves_a_named_variation_with_its_name_as_the_variant(
+        self, serve: ServerFactory, provide: ProviderFactory
     ) -> None:
-        provider.resolve_string_details("greeting", "default")
-        monkeypatch.setattr(provider._client, "get_value", lambda key, default, context: default)
+        provider = provide(serve(self.experiment()))
+        provider.initialize(EvaluationContext())
 
-        details = provider.resolve_string_details("greeting", "default")
+        details = provider.resolve_string_details(
+            "checkout-cta-copy", "in-code default", EvaluationContext("user-1")
+        )
 
-        assert (details.value, details.reason, details.variant) == ("default", None, None)
+        assert (details.value, details.reason, details.variant) == (
+            "Try it free",
+            Reason.TARGETING_MATCH,
+            "treatment",
+        )
+
+    def test_resolves_an_unnamed_variation_with_its_value_id_as_the_variant(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        provider = provide(serve(self.experiment()))
+        provider.initialize(EvaluationContext())
+
+        details = provider.resolve_string_details(
+            "checkout-cta-copy", "in-code default", EvaluationContext("user-1", {"name": "Ada Lovelace"})
+        )
+
+        assert (details.value, details.reason, details.variant) == (
+            "Get started",
+            Reason.TARGETING_MATCH,
+            "value-id-get-started",
+        )
+
+    def test_resolves_a_flag_with_its_value_id_as_the_variant(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        provider = provide(serve(config("enabled", "boolean", "true")))
+        provider.initialize(EvaluationContext())
+
+        details = provider.resolve_boolean_details("enabled", False)
+
+        assert (details.value, details.reason, details.variant) == (
+            True,
+            Reason.TARGETING_MATCH,
+            "default-of-enabled",
+        )
+
+    def test_a_context_without_a_targeting_key_or_id_at_a_rollout_gets_the_default_targeting_rule_value(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        provider = provide(serve(self.experiment()))
+        provider.initialize(EvaluationContext())
+
+        details = provider.resolve_string_details(
+            "checkout-cta-copy", "in-code default", EvaluationContext(attributes={"name": "Grace Hopper"})
+        )
+
+        assert (details.value, details.reason, details.variant, details.error_code) == (
+            "Start free trial",
+            Reason.DEFAULT,
+            "control",
+            None,
+        )
+
+    def test_a_flag_in_a_rollout_for_a_context_without_a_targeting_key_resolves_with_its_value_id(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        flag = config("dark-mode", "boolean", "false")
+        flag["target"]["rules"] = [
+            {
+                "id": self.ROLLOUT_RULE_ID,
+                "order": 0,
+                "type": "percentage",
+                "target": "percentage",
+                "percentages": [
+                    {
+                        "id": self.TREATMENT_SHARE_ID,
+                        "percentage": 100,
+                        "value": "true",
+                        "valueId": "value-id-dark-mode-on",
+                    }
+                ],
+            }
+        ]
+        provider = provide(serve(flag))
+        provider.initialize(EvaluationContext())
+
+        details = provider.resolve_boolean_details("dark-mode", True)
+
+        assert (details.value, details.reason, details.variant) == (
+            False,
+            Reason.DEFAULT,
+            "default-of-dark-mode",
+        )
+
+    def test_reports_the_rule_share_and_variation_of_a_resolved_rollout(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve(self.experiment())
+        provider = provide(server)
+        provider.initialize(EvaluationContext())
+        provider.resolve_string_details("checkout-cta-copy", "in-code default", EvaluationContext("user-1"))
+
+        provider.shutdown()
+
+        event = server.requests_to(TELEMETRY_PATH)[0].body["aggregatedEvents"]["evaluatedConfig"][0]["event"]
+        assert event["ruleId"] == self.ROLLOUT_RULE_ID
+        assert event["shareId"] == self.TREATMENT_SHARE_ID
+        assert event["variationId"] == self.TREATMENT_ID
+
+    def test_runs_an_after_hook_that_sees_the_variation_name_as_the_variant(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        api.set_provider_and_wait(provide(serve(self.experiment())))
+        hook = RecordingHook()
+        client = api.get_client()
+        client.add_hooks([hook])
+
+        client.get_string_value("checkout-cta-copy", "in-code default", EvaluationContext("user-1"))
+
+        assert [(details.reason, details.variant) for details in hook.after_details] == [
+            (Reason.TARGETING_MATCH, "treatment")
+        ]
 
 
 class TestContext:

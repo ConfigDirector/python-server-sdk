@@ -11,6 +11,7 @@ from .types import (
     Condition,
     ConditionalRule,
     Config,
+    ConfigVariation,
     EnumTypeConstraints,
     EvaluationContext,
     NumericTypeConstraints,
@@ -23,7 +24,6 @@ from .types import (
     Target,
     TargetingRules,
     TargetType,
-    Variation,
 )
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     "ConditionalRule",
     "Config",
     "ConfigEvaluator",
+    "ConfigVariation",
     "EnumTypeConstraints",
     "EvaluationContext",
     "NumericTypeConstraints",
@@ -44,7 +45,6 @@ __all__ = [
     "Target",
     "TargetType",
     "TargetingRules",
-    "Variation",
     "assign_percentage",
     "compare_array",
     "compare_date",

@@ -86,6 +86,9 @@ class EvaluatedConfigEvent:
     context_kind: str | None = None
     type: ConfigType | None = None
     evaluated_value_id: str | None = None
+    variation_id: str | None = None
+    rule_id: str | None = None
+    share_id: str | None = None
 
     @classmethod
     def of(
@@ -100,6 +103,9 @@ class EvaluatedConfigEvent:
         context_kind: str | None = None,
         config_type: ConfigType | None = None,
         value_id: str | None = None,
+        variation_id: str | None = None,
+        rule_id: str | None = None,
+        share_id: str | None = None,
     ) -> EvaluatedConfigEvent:
         return cls(
             key=key,
@@ -112,6 +118,9 @@ class EvaluatedConfigEvent:
             context_kind=context_kind,
             type=config_type,
             evaluated_value_id=value_id,
+            variation_id=variation_id,
+            rule_id=rule_id,
+            share_id=share_id,
         )
 
     def compacted(self) -> EvaluatedConfigEvent:
@@ -137,6 +146,12 @@ class EvaluatedConfigEvent:
             wire["evaluatedValueId"] = self.evaluated_value_id
         wire["usedDefault"] = self.used_default
         wire["evaluationReason"] = self.evaluation_reason
+        if self.rule_id is not None:
+            wire["ruleId"] = self.rule_id
+        if self.share_id is not None:
+            wire["shareId"] = self.share_id
+        if self.variation_id is not None:
+            wire["variationId"] = self.variation_id
         return wire
 
 

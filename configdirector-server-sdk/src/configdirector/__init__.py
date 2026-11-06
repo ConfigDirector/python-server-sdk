@@ -47,6 +47,7 @@ from .types import (
     Metadata,
     Subscription,
     TelemetryOptions,
+    Variation,
     WatchHandler,
 )
 
@@ -77,6 +78,7 @@ __all__ = [
     "Metadata",
     "Subscription",
     "TelemetryOptions",
+    "Variation",
     "WatchHandler",
     "__version__",
     "create_client",

@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from configdirector._value_parser import parse_config_value
-from configdirector.types import ConfigState, ConfigType
+from configdirector.types import ConfigState, ConfigType, Variation
 
 
 def state(value: str | None, *, type: ConfigType = "string", value_id: str | None = "v-1") -> ConfigState:
@@ -178,3 +178,32 @@ class TestValueId:
 
     def test_a_default_carries_no_value_id(self) -> None:
         assert parse_config_value(state("hello"), 0).value_id is None
+
+
+class TestVariationAndRolloutShare:
+    def served_state(self) -> ConfigState:
+        return ConfigState(
+            id="cfg-1",
+            key="a-key",
+            type="string",
+            value="hello",
+            value_id="v-1",
+            variation=Variation(id="variation-1", name="treatment"),
+            rule_id="rule-1",
+            share_id="share-1",
+        )
+
+    def test_a_matched_value_carries_the_variation_rule_and_share_it_was_served_with(self) -> None:
+        result = parse_config_value(self.served_state(), "fallback")
+
+        assert result.variation == Variation(id="variation-1", name="treatment")
+        assert result.rule_id == "rule-1"
+        assert result.share_id == "share-1"
+
+    def test_the_in_code_default_value_carries_no_variation_rule_or_share(self) -> None:
+        result = parse_config_value(self.served_state(), 0)
+
+        assert result.used_default is True
+        assert result.variation is None
+        assert result.rule_id is None
+        assert result.share_id is None

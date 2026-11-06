@@ -360,8 +360,10 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             definition = definitions[config_key]
             for watcher in entries:
                 try:
-                    value = self._evaluate(config_key, definition, watcher.default, watcher.context, segments)
-                    watcher.handler(value)
+                    evaluation = self._evaluate_definition(
+                        config_key, definition, watcher.default, watcher.context, segments
+                    )
+                    watcher.handler(evaluation.value)
                 except Exception as error:
                     # One faulty watcher must not cost the others their update, and it must not
                     # take down the transport thread this runs on.
@@ -388,6 +390,14 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         default: ConfigValueT,
         context: Context | None = None,
     ) -> ConfigValueT:
+        return cast(ConfigValueT, self.evaluate(config_key, default, context).value)
+
+    def evaluate(
+        self,
+        config_key: str,
+        default: ConfigValue,
+        context: Context | None = None,
+    ) -> ConfigEvaluation:
         validate_config_key(config_key)
         _validate_default(default)
 
@@ -395,16 +405,16 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             definition = self._configs.get(config_key) if self._configs is not None else None
             segments = self._segments
 
-        return self._evaluate(config_key, definition, default, context, segments)
+        return self._evaluate_definition(config_key, definition, default, context, segments)
 
-    def _evaluate(
+    def _evaluate_definition(
         self,
         config_key: str,
         definition: Config | None,
-        default: ConfigValueT,
+        default: ConfigValue,
         supplied_context: Context | None,
         segments: Segments,
-    ) -> ConfigValueT:
+    ) -> ConfigEvaluation:
         context = self._context_to_evaluate(supplied_context)
         if definition is None:
             reason: EvaluationReason = "config-state-missing" if self.is_ready else "client-not-ready"
@@ -421,27 +431,48 @@ class _ConfigDirectorClient(ConfigDirectorClient):
                 context=context,
                 value_id=value_id,
             )
-            self._emit_evaluation(config_key, default, True, reason, value_id, context)
-            return default
+            in_code_default_evaluation = ConfigEvaluation(
+                key=config_key,
+                value=default,
+                is_default=True,
+                reason=reason,
+                value_id=value_id,
+                context=context,
+            )
+            self._emit("config_evaluated", ConfigEvaluatedEvent(evaluation=in_code_default_evaluation))
+            return in_code_default_evaluation
 
-        state = self._evaluator.evaluate(
+        served_config = self._evaluator.evaluate_with_reason(
             definition, EvaluationContext(context=context, metadata=self._metadata), segments
         )
-        result = parse_config_value(state, default)
-        value_id = result.value_id or value_id_for(result.value, state.type)
+        result = parse_config_value(served_config.state, default)
+        reason = result.reason if result.used_default else served_config.reason
+        value_id = result.value_id or value_id_for(result.value, served_config.state.type)
         self._logger.debug("Evaluated %r to %r", config_key, result.value)
         self._telemetry.record_evaluation(
             key=config_key,
             default=default,
             value=result.value,
             used_default=result.used_default,
-            reason=result.reason,
+            reason=reason,
             context=context,
-            config_type=state.type,
+            config_type=served_config.state.type,
             value_id=value_id,
+            variation_id=result.variation.id if result.variation is not None else None,
+            rule_id=result.rule_id,
+            share_id=result.share_id,
         )
-        self._emit_evaluation(config_key, result.value, result.used_default, result.reason, value_id, context)
-        return cast(ConfigValueT, result.value)
+        evaluation = ConfigEvaluation(
+            key=config_key,
+            value=result.value,
+            is_default=result.used_default,
+            reason=reason,
+            value_id=value_id,
+            context=context,
+            variation=result.variation,
+        )
+        self._emit("config_evaluated", ConfigEvaluatedEvent(evaluation=evaluation))
+        return evaluation
 
     def _context_to_evaluate(self, supplied_context: Context | None) -> Context | None:
         if supplied_context is None or supplied_context.kind is None or is_valid_kind(supplied_context.kind):
@@ -468,29 +499,6 @@ class _ConfigDirectorClient(ConfigDirectorClient):
                 )
             case "known-kind-sample" | "beyond-sample-limit":
                 pass
-
-    def _emit_evaluation(
-        self,
-        config_key: str,
-        value: ConfigValue,
-        is_default: bool,
-        reason: EvaluationReason,
-        value_id: str | None,
-        context: Context | None,
-    ) -> None:
-        self._emit(
-            "config_evaluated",
-            ConfigEvaluatedEvent(
-                evaluation=ConfigEvaluation(
-                    key=config_key,
-                    value=value,
-                    is_default=is_default,
-                    reason=reason,
-                    value_id=value_id,
-                    context=context,
-                )
-            ),
-        )
 
     def get_all_configs(
         self,

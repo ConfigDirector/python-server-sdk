@@ -5,7 +5,7 @@ import math
 from decimal import Decimal
 from typing import Any
 
-from ._evaluation import Config, TargetingRules, Variation
+from ._evaluation import Config, ConfigVariation, TargetingRules
 from ._validation import validate_config_key
 from .errors import ConfigDirectorTypeError, ConfigDirectorValidationError
 from .types import ConfigType, ConfigValue
@@ -20,7 +20,7 @@ def unconditional_config(key: str, value: ConfigValue, *, config_id: str, value_
         key=key,
         type=config_type,
         target=TargetingRules(default_value=text, default_value_id=value_id),
-        variations=[Variation(value=text)],
+        variations=[ConfigVariation(value=text)],
     )
 
 

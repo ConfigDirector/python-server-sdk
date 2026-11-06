@@ -4,8 +4,8 @@ import json
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, cast
 
 from configdirector import _http
 from configdirector._bundle import BundleKind, ConfigBundle
@@ -19,7 +19,11 @@ from configdirector._evaluation import (
     Segments,
     TargetingRules,
 )
-from configdirector._telemetry import InvalidContextRecording, TelemetryCollectorOptions
+from configdirector._telemetry import (
+    InvalidContextRecording,
+    TelemetryCollector,
+    TelemetryCollectorOptions,
+)
 from configdirector._transport import TransportOptions
 from configdirector.client import _ConfigDirectorClient
 from configdirector.types import (
@@ -31,6 +35,7 @@ from configdirector.types import (
 )
 
 WAIT_TIMEOUT = 5.0
+_NEVER = 3_600.0
 
 
 def wait_for(predicate: Callable[[], bool], *, timeout: float = WAIT_TIMEOUT) -> bool:
@@ -175,6 +180,9 @@ class RecordedEvaluation:
     context: Context | None
     config_type: ConfigType | None
     value_id: str | None
+    variation_id: str | None = None
+    rule_id: str | None = None
+    share_id: str | None = None
 
 
 class FakeTelemetryCollector:
@@ -197,6 +205,9 @@ class FakeTelemetryCollector:
         context: Context | None = None,
         config_type: ConfigType | None = None,
         value_id: str | None = None,
+        variation_id: str | None = None,
+        rule_id: str | None = None,
+        share_id: str | None = None,
     ) -> None:
         self.evaluations.append(
             RecordedEvaluation(
@@ -208,6 +219,9 @@ class FakeTelemetryCollector:
                 context=context,
                 config_type=config_type,
                 value_id=value_id,
+                variation_id=variation_id,
+                rule_id=rule_id,
+                share_id=share_id,
             )
         )
 
@@ -238,6 +252,28 @@ class TelemetryRecorder:
     @property
     def evaluations(self) -> list[RecordedEvaluation]:
         return self.last.evaluations
+
+
+class ReportingTelemetry:
+    def __init__(self, http: StubHttp) -> None:
+        self._http = http
+        self.collectors: list[TelemetryCollector] = []
+
+    def __call__(self, options: TelemetryCollectorOptions) -> TelemetryCollector:
+        collector = TelemetryCollector(
+            replace(
+                options,
+                http=cast(_http.HttpClient, self._http),
+                flush_interval=_NEVER,
+                initial_flush_delay=_NEVER,
+            )
+        )
+        self.collectors.append(collector)
+        return collector
+
+    @property
+    def last(self) -> TelemetryCollector:
+        return self.collectors[-1]
 
 
 ClientBuilder = Callable[..., _ConfigDirectorClient]

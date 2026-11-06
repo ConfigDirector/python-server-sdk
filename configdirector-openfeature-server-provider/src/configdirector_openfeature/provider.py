@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping, Sequence
-from contextvars import ContextVar
 from enum import Enum, auto
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from configdirector import (
     ClientHooks,
     ClientReadyEvent,
     ConfigDirectorLogger,
-    ConfigEvaluatedEvent,
-    ConfigEvaluation,
     ConfigsUpdatedEvent,
     ConfigValue,
     ConnectionOptions,
@@ -44,8 +41,6 @@ _RECORDED_FAILURE_POLL_INTERVAL = 0.01
 
 _ValueT = TypeVar("_ValueT", bound=ConfigValue)
 
-_evaluated: ContextVar[ConfigEvaluation | None] = ContextVar("configdirector_evaluated", default=None)
-
 
 class _Startup(Enum):
     INITIALIZING = auto()
@@ -77,7 +72,12 @@ class ConfigDirectorProvider(AbstractProvider):
     traits, and a boolean ``anonymous`` its anonymous flag. Without a ``kind`` attribute the
     context is a ``user``, and a ``kind`` inside ``traits`` is an ordinary trait. When the kind is
     invalid, including any kind that is not a string, the whole context is ignored: the evaluation
-    still resolves successfully, to the value for no context, and the SDK logs an error.
+    still resolves successfully, to the value for no context, and the SDK logs an error. A context
+    with neither a targeting key nor an ``id`` attribute skips percentage rollouts: the flag
+    resolves to the default targeting rule value, with the reason ``DEFAULT``.
+
+    Evaluation details carry the variation's name as the ``variant`` when the value served belongs
+    to a named variation, and the value's id otherwise.
 
     If no config arrives within the connection timeout, or ConfigDirector rejects the server SDK
     key, initialization fails with :class:`~openfeature.exception.ProviderNotReadyError`:
@@ -136,7 +136,6 @@ class ConfigDirectorProvider(AbstractProvider):
             hooks=ClientHooks(
                 client_ready=self._on_client_ready,
                 configs_updated=self._on_configs_updated,
-                config_evaluated=self._on_config_evaluated,
             ),
         )
 
@@ -228,12 +227,8 @@ class ConfigDirectorProvider(AbstractProvider):
     def _resolve(
         self, flag_key: str, default_value: _ValueT, evaluation_context: EvaluationContext | None
     ) -> FlagResolutionDetails[_ValueT]:
-        _evaluated.set(None)
-        value = self._client.get_value(flag_key, default_value, to_context(evaluation_context))
-        return to_resolution_details(value, _evaluated.get())
-
-    def _on_config_evaluated(self, event: ConfigEvaluatedEvent) -> None:
-        _evaluated.set(event.evaluation)
+        evaluation = self._client.evaluate(flag_key, default_value, to_context(evaluation_context))
+        return cast(FlagResolutionDetails[_ValueT], to_resolution_details(evaluation))
 
     def _on_configs_updated(self, event: ConfigsUpdatedEvent) -> None:
         self.emit_provider_configuration_changed(

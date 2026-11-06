@@ -15,6 +15,7 @@ __all__ = [
     "Condition",
     "ConditionalRule",
     "Config",
+    "ConfigVariation",
     "EnumTypeConstraints",
     "EvaluationContext",
     "NumericTypeConstraints",
@@ -28,7 +29,6 @@ __all__ = [
     "Target",
     "TargetType",
     "TargetingRules",
-    "Variation",
 ]
 
 TEXT_OPERATORS = (
@@ -87,6 +87,7 @@ class Percentage:
     percentage: float
     value: RuleValue = None
     value_id: str | None = None
+    variation_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,17 +96,18 @@ class ConditionalRule:
     order: int | None
     value: RuleValue = None
     conditions: list[Condition] = field(default_factory=list)
-    percentages: list[Percentage] = field(default_factory=list)
+    percentages: list[Percentage] | None = field(default_factory=list)
     target: str = "value"
     type: str = "conditional"
     value_id: str | None = None
+    variation_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class PercentageRule:
     id: str
     order: int | None
-    percentages: list[Percentage] = field(default_factory=list)
+    percentages: list[Percentage] | None = field(default_factory=list)
     target: str = "percentage"
     type: str = "percentage"
 
@@ -118,12 +120,14 @@ class TargetingRules:
     default_value: str
     rules: list[Rule] = field(default_factory=list)
     default_value_id: str | None = None
+    default_variation_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class Variation:
+class ConfigVariation:
     value: str | int | float | bool
     name: str | None = None
+    id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +148,7 @@ class Config:
     key: str
     type: ConfigType
     target: TargetingRules
-    variations: list[Variation] = field(default_factory=list)
+    variations: list[ConfigVariation] = field(default_factory=list)
     type_constraints: NumericTypeConstraints | EnumTypeConstraints | None = None
 
 

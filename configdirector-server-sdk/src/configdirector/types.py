@@ -31,6 +31,7 @@ __all__ = [
     "Metadata",
     "Subscription",
     "TelemetryOptions",
+    "Variation",
     "WatchHandler",
 ]
 
@@ -58,6 +59,7 @@ application gives it without connecting."""
 
 EvaluationReason = Literal[
     "found-match",
+    "rollout-skipped-no-identifier",
     "config-state-missing",
     "client-not-ready",
     "type-mismatch",
@@ -66,7 +68,15 @@ EvaluationReason = Literal[
     "invalid-json",
     "invalid-boolean",
 ]
-"""Why an evaluation produced the value that it did."""
+"""Why an evaluation produced the value that it did.
+
+``"found-match"`` returns a value from ConfigDirector. ``"rollout-skipped-no-identifier"`` returns
+the default targeting rule value: the SDK skipped a percentage rollout because the context has no
+``id`` to place it in a share. ``"value-missing"`` returns the in-code default value because the
+config has no value. Every other reason returns the in-code default value because of an error: the
+config does not exist (``"config-state-missing"``), no values have arrived yet
+(``"client-not-ready"``), or the value cannot be read as the type of the in-code default value
+(``"type-mismatch"``, ``"invalid-number"``, ``"invalid-json"``, ``"invalid-boolean"``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,9 +85,11 @@ class Context:
 
     Attributes:
         id: The user's identifier. This should uniquely identify an application user.
-            For anonymous users you may generate a UUID, or omit ``id`` entirely and let
-            the SDK generate one. Keep in mind this value segments users in percentage
-            rollouts, so changing it can move a user into a different percentile.
+            For anonymous users you may generate a UUID or use a session ID. Keep in mind this
+            value segments users in percentage rollouts, so changing it can move a user into a
+            different percentile. A context without an ``id`` skips percentage rollouts: it is
+            served the default targeting rule value, and the targeting rules after the rollout
+            are not tried.
         name: The user's display name. Shown in the ConfigDirector dashboard and usable in
             targeting rules.
         traits: Arbitrary traits for the current user. Shown in the ConfigDirector dashboard
@@ -117,19 +129,61 @@ class Metadata:
 
 
 @dataclass(frozen=True, slots=True)
+class Variation:
+    """One of the values a config can serve, such as the control or a treatment of an experiment.
+
+    Attributes:
+        id: The ID ConfigDirector assigned to the variation, which stays the same when it is
+            renamed.
+        name: The variation's name, or ``None`` when it has none.
+    """
+
+    id: str
+    name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ConfigState:
-    """The raw, evaluated state of a single config, before type parsing."""
+    """The raw, evaluated state of a single config, before type parsing.
+
+    Attributes:
+        id: The config's ID.
+        key: The config's key.
+        type: The type the config was declared with.
+        value: The value served, as text.
+        value_id: The ID ConfigDirector assigned to the value served, when it sent one.
+        variation: The variation that was served, or ``None`` when the config has no variations.
+        rule_id: The ID of the percentage rollout's targeting rule when a rollout served the
+            value, otherwise ``None``.
+        share_id: The ID of the percentage rollout's share when a rollout served the value,
+            otherwise ``None``.
+    """
 
     id: str
     key: str
     type: ConfigType
     value: str | None
     value_id: str | None = None
+    variation: Variation | None = None
+    rule_id: str | None = None
+    share_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ConfigEvaluation:
-    """The result of evaluating a single config key."""
+    """The result of evaluating a single config key.
+
+    Attributes:
+        key: The config key that was evaluated.
+        value: The value the evaluation returned.
+        is_default: Whether the evaluation returned the in-code default value.
+        reason: Why the evaluation returned this value.
+        value_id: The ID of the value returned.
+        context: The context the config was evaluated for, or ``None`` when no context was
+            supplied or it was ignored for an invalid kind.
+        variation: The variation that was served, or ``None`` when the config has no variations
+            or the in-code default value is returned.
+    """
 
     key: str
     value: ConfigValue
@@ -137,6 +191,7 @@ class ConfigEvaluation:
     reason: EvaluationReason
     value_id: str | None = None
     context: Context | None = None
+    variation: Variation | None = None
 
 
 @runtime_checkable
@@ -464,6 +519,32 @@ class ConfigDirectorClient(Protocol):
                 client is not ready, the key is unknown, or the stored value cannot be read as
                 the default's type. Its type also determines the type the config is parsed as.
             context: The user's context, used for targeting rule evaluation.
+
+        Raises:
+            ConfigDirectorValidationError: If ``config_key`` is blank.
+            ConfigDirectorTypeError: If ``default`` is ``None`` or of an unsupported type.
+        """
+        ...
+
+    def evaluate(
+        self,
+        config_key: str,
+        default: ConfigValue,
+        context: Context | None = None,
+    ) -> ConfigEvaluation:
+        """Evaluate a config as :meth:`get_value` does and return the evaluation: the value, the
+        reason it was served, its value ID and its variation.
+
+        Like every read, it fires ``config_evaluated`` and is counted in telemetry.
+
+        Args:
+            config_key: The config key to evaluate.
+            default: The in-code default value, returned when no value from ConfigDirector can be
+                served. Its type also determines the type the config is parsed as.
+            context: The user's context, used for targeting rule evaluation.
+
+        Returns:
+            The evaluation, whose ``value`` is what :meth:`get_value` returns.
 
         Raises:
             ConfigDirectorValidationError: If ``config_key`` is blank.

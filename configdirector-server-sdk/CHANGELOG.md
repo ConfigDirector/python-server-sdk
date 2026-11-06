@@ -8,6 +8,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `evaluate(config_key, default, context=None)` on the client returns a `ConfigEvaluation`: the
+  value, the reason it was served, its value ID and its variation. Its `value` is what `get_value`
+  returns, and like every read it fires `config_evaluated` and is counted in telemetry.
+- `ConfigEvaluation.variation`, on `evaluate` and the `config_evaluated` event: the `id` and `name`
+  of the variation that was served. It is `None` when the config has no variations or the in-code
+  default value is returned, and an unnamed variation has a `name` of `None`. The new `Variation`
+  type is exported.
+- Each `get_all_configs` entry now carries the `variation` of the value served, and the `rule_id`
+  and `share_id` of the percentage rollout that served it.
+- The evaluation counts the SDK sends to ConfigDirector now say which variation was served, and
+  which percentage rollout and share served it, so ConfigDirector can count the contexts each
+  variation of an experiment reached.
+
+### Changed
+
+- A context without an `id` now skips percentage rollouts. `get_value`, `evaluate`, watchers and
+  `get_all_configs` serve it the default targeting rule value, and the targeting rules after the
+  rollout are not tried. This includes a call without a context and a context ignored for an
+  invalid kind. `evaluate` and the `config_evaluated` event report it with the new reason
+  `rollout-skipped-no-identifier` and `is_default=False`. Before, every context without an `id` was
+  served the rollout's first share. Give an anonymous context a stable `id`, such as a session or
+  device ID, to keep it in a rollout. A rule that serves a single value still applies to a context
+  without an `id`.
+- `ConfigDirectorClient` has a new method, `evaluate`, so a class of your own that implements it,
+  such as a fake in your tests, needs one too.
+
 ## [1.8.1] - 2026-10-28
 
 ### Fixed

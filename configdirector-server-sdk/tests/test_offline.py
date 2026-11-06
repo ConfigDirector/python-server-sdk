@@ -141,6 +141,17 @@ def test_a_file_given_as_a_path_serves_its_values(create: ClientFactory, tmp_pat
     assert client.get_value("new-checkout", False) is True
 
 
+def test_evaluate_returns_the_offline_value_with_no_variation(create: ClientFactory) -> None:
+    client = create(connection=ConnectionOptions(mode="offline", values={"new-checkout": True}))
+    client.initialize()
+
+    evaluation = client.evaluate("new-checkout", False)
+
+    assert evaluation.value is True
+    assert evaluation.reason == "found-match"
+    assert evaluation.variation is None
+
+
 def test_a_served_value_is_a_found_match(create: ClientFactory) -> None:
     client = create(connection=ConnectionOptions(mode="offline", values={"new-checkout": True}))
     evaluations: list[ConfigEvaluatedEvent] = []

@@ -112,6 +112,18 @@ class TestConformance:
         assert client.get_value("tags", []) == ["a", "b"]
         assert sorted(client.get_all_configs()) == ["count", "flag", "greeting", "ratio", "tags", "theme"]
 
+    def test_evaluate_returns_the_seeded_value_with_no_variation(
+        self, create: Callable[..., TestClient]
+    ) -> None:
+        client = create({"flag": True}).client
+        client.initialize()
+
+        evaluation = client.evaluate("flag", False)
+
+        assert evaluation.value is True
+        assert evaluation.reason == "found-match"
+        assert evaluation.variation is None
+
     def test_serves_the_same_value_to_every_context(self, create: Callable[..., TestClient]) -> None:
         client = create({"flag": True}).client
         client.initialize()

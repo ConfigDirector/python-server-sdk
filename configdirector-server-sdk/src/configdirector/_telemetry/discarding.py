@@ -18,6 +18,9 @@ class DiscardingTelemetry:
         context: Context | None = None,
         config_type: ConfigType | None = None,
         value_id: str | None = None,
+        variation_id: str | None = None,
+        rule_id: str | None = None,
+        share_id: str | None = None,
     ) -> None:
         return None
 

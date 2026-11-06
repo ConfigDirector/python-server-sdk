@@ -216,6 +216,20 @@ class TestEvaluatedConfigEvent:
         assert "type" not in wire
         assert "evaluatedValueId" not in wire
 
+    def test_carries_the_rule_share_and_variation(self) -> None:
+        wire = event(rule_id="rule-1", share_id="share-1", variation_id="variation-1").compacted().to_wire()
+
+        assert wire["ruleId"] == "rule-1"
+        assert wire["shareId"] == "share-1"
+        assert wire["variationId"] == "variation-1"
+
+    def test_omits_the_rule_share_and_variation_when_there_are_none(self) -> None:
+        wire = event().compacted().to_wire()
+
+        assert "ruleId" not in wire
+        assert "shareId" not in wire
+        assert "variationId" not in wire
+
     def test_passes_through_the_value_id_the_server_sent(self) -> None:
         wire = event(value_id="server-id").compacted().to_wire()
 

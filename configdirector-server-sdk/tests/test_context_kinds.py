@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import replace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
 from configdirector import ConfigEvaluatedEvent, Context
 from configdirector._evaluation import Config, Percentage
-from configdirector._http import HttpClient
-from configdirector._telemetry import TelemetryCollector, TelemetryCollectorOptions
 from configdirector.client import _ConfigDirectorClient
 from tests.helpers import (
     RecordingLogger,
+    ReportingTelemetry,
     StubHttp,
     TransportRecorder,
     bundle,
@@ -24,7 +22,6 @@ from tests.helpers import (
 
 SDK_KEY = "test-server-sdk-key"
 CONFIG_ID = "11111111-1111-4111-8111-111111111111"
-NEVER = 3_600.0
 INVALID_KIND_MESSAGE = (
     "Ignored a context with the invalid kind '{}' and evaluated as if no context was supplied. "
     "A context kind has 1 to 64 characters, using only lowercase letters, digits, '-' and '_'."
@@ -34,28 +31,6 @@ FURTHER_INVALID_KINDS_MESSAGE = (
     "20 different invalid kinds were logged recently, so further invalid kinds are not logged "
     "individually."
 )
-
-
-class ReportingTelemetry:
-    def __init__(self, http: StubHttp) -> None:
-        self._http = http
-        self.collectors: list[TelemetryCollector] = []
-
-    def __call__(self, options: TelemetryCollectorOptions) -> TelemetryCollector:
-        collector = TelemetryCollector(
-            replace(
-                options,
-                http=cast(HttpClient, self._http),
-                flush_interval=NEVER,
-                initial_flush_delay=NEVER,
-            )
-        )
-        self.collectors.append(collector)
-        return collector
-
-    @property
-    def last(self) -> TelemetryCollector:
-        return self.collectors[-1]
 
 
 @pytest.fixture
@@ -470,4 +445,4 @@ class TestTargetingKinds:
             == "50 and above"
         )
         assert client.get_value("split", "in-code-default", Context(id="user-1", kind="tenant")) == "8 to 50"
-        assert client.get_value("split", "in-code-default", Context(kind="device")) == "below 8"
+        assert client.get_value("split", "in-code-default", Context(kind="device")) == "this-is-the-default"

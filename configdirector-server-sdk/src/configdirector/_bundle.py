@@ -10,6 +10,7 @@ from ._evaluation.types import (
     Condition,
     ConditionalRule,
     Config,
+    ConfigVariation,
     EnumTypeConstraints,
     NumericTypeConstraints,
     Percentage,
@@ -20,7 +21,6 @@ from ._evaluation.types import (
     SegmentCondition,
     Segments,
     TargetingRules,
-    Variation,
 )
 from .types import ConfigDirectorLogger, ConfigType
 
@@ -94,6 +94,7 @@ def _parse_config(raw: Any) -> Config:
             default_value=_as_string(target.get("defaultValue")),
             rules=[_parse_rule(rule) for rule in target.get("rules") or []],
             default_value_id=_optional_string(target.get("defaultValueId")),
+            default_variation_id=_optional_string(target.get("defaultVariationId")),
         ),
         variations=[_parse_variation(variation) for variation in raw.get("variations") or []],
         type_constraints=_parse_type_constraints(raw.get("typeConstraints")),
@@ -102,7 +103,10 @@ def _parse_config(raw: Any) -> Config:
 
 def _parse_rule(raw: Any) -> Rule:
     kind = raw.get("type")
-    percentages = [_parse_percentage(percentage) for percentage in raw.get("percentages") or []]
+    raw_percentages = raw.get("percentages")
+    percentages = (
+        None if raw_percentages is None else [_parse_percentage(percentage) for percentage in raw_percentages]
+    )
 
     if kind == "percentage":
         return PercentageRule(
@@ -123,6 +127,7 @@ def _parse_rule(raw: Any) -> Rule:
         target=str(raw.get("target") or "value"),
         type=str(kind) if kind is not None else "conditional",
         value_id=_optional_string(raw.get("valueId")),
+        variation_id=_optional_string(raw.get("variationId")),
     )
 
 
@@ -180,14 +185,16 @@ def _parse_percentage(raw: Any) -> Percentage:
         percentage=float(raw["percentage"]),
         value=_rule_value(raw.get("value")),
         value_id=_optional_string(raw.get("valueId")),
+        variation_id=_optional_string(raw.get("variationId")),
     )
 
 
-def _parse_variation(raw: Any) -> Variation:
+def _parse_variation(raw: Any) -> ConfigVariation:
     value = raw.get("value")
-    return Variation(
+    return ConfigVariation(
         value=value if isinstance(value, (str, int, float, bool)) else _as_string(value),
         name=_optional_string(raw.get("name")),
+        id=_optional_string(raw.get("id")),
     )
 
 

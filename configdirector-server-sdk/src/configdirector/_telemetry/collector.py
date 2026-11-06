@@ -70,6 +70,9 @@ class TelemetryProtocol(Protocol):
         context: Context | None = None,
         config_type: ConfigType | None = None,
         value_id: str | None = None,
+        variation_id: str | None = None,
+        rule_id: str | None = None,
+        share_id: str | None = None,
     ) -> None: ...
 
     def record_invalid_context(self, kind_sample: str) -> InvalidContextRecording: ...
@@ -120,6 +123,9 @@ class TelemetryCollector:
         context: Context | None = None,
         config_type: ConfigType | None = None,
         value_id: str | None = None,
+        variation_id: str | None = None,
+        rule_id: str | None = None,
+        share_id: str | None = None,
     ) -> None:
         if not self._is_collecting():
             return
@@ -144,6 +150,9 @@ class TelemetryCollector:
                 context_kind=context_kind,
                 config_type=config_type,
                 value_id=value_id,
+                variation_id=variation_id,
+                rule_id=rule_id,
+                share_id=share_id,
             )
         )
 

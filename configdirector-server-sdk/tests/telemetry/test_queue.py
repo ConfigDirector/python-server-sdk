@@ -11,9 +11,22 @@ START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 END = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
 
 
-def event(key: str = "my-config", value: str = "hello") -> EvaluatedConfigEvent:
+def event(
+    key: str = "my-config",
+    value: str = "hello",
+    variation_id: str | None = None,
+    rule_id: str | None = None,
+    share_id: str | None = None,
+) -> EvaluatedConfigEvent:
     return EvaluatedConfigEvent.of(
-        key=key, default="default", value=value, used_default=False, reason="found-match"
+        key=key,
+        default="default",
+        value=value,
+        used_default=False,
+        reason="found-match",
+        variation_id=variation_id,
+        rule_id=rule_id,
+        share_id=share_id,
     )
 
 
@@ -188,6 +201,33 @@ class TestAggregate:
         aggregated = aggregate([event("config-a"), event("config-b"), event("config-a")], START, END)
 
         assert sorted((a.event.key, a.count) for a in aggregated) == [("config-a", 2), ("config-b", 1)]
+
+    def test_keeps_events_of_different_rules_apart(self) -> None:
+        entries = aggregate([event(rule_id="rule-1"), event(rule_id="rule-2")], START, END)
+
+        assert [(entry.event.rule_id, entry.count) for entry in entries] == [("rule-1", 1), ("rule-2", 1)]
+
+    def test_keeps_events_of_different_shares_apart(self) -> None:
+        entries = aggregate([event(share_id="share-1"), event(share_id="share-2")], START, END)
+
+        assert [(entry.event.share_id, entry.count) for entry in entries] == [("share-1", 1), ("share-2", 1)]
+
+    def test_keeps_events_of_different_variations_apart(self) -> None:
+        entries = aggregate(
+            [event(variation_id="variation-1"), event(variation_id="variation-2")], START, END
+        )
+
+        assert [(entry.event.variation_id, entry.count) for entry in entries] == [
+            ("variation-1", 1),
+            ("variation-2", 1),
+        ]
+
+    def test_collapses_events_with_the_same_rule_share_and_variation(self) -> None:
+        served_event = event(rule_id="rule-1", share_id="share-1", variation_id="variation-1")
+
+        entries = aggregate([served_event, served_event], START, END)
+
+        assert [entry.count for entry in entries] == [2]
 
     def test_every_entry_carries_the_window_the_snapshot_covers(self) -> None:
         aggregated = aggregate([event("a"), event("b")], START, END)

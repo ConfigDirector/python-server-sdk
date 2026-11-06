@@ -4,15 +4,17 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from configdirector import Context, Metadata
+from configdirector import ConfigState, Context, Metadata, Variation
 from configdirector._evaluation import (
     AttributeCondition,
     ConditionalRule,
     Config,
     ConfigEvaluator,
+    ConfigVariation,
     EvaluationContext,
     Percentage,
     PercentageRule,
+    Rule,
     TargetingRules,
 )
 from tests.helpers import create_stubbed_logger
@@ -48,6 +50,17 @@ def plan_is(value: str) -> AttributeCondition:
         attribute="traits",
         operator="=",
         trait="/plan",
+        target_type="text",
+        target_values=[value],
+    )
+
+
+def name_is(value: str) -> AttributeCondition:
+    return AttributeCondition(
+        id=uid(),
+        attribute="name",
+        operator="equals",
+        trait=None,
         target_type="text",
         target_values=[value],
     )
@@ -455,54 +468,129 @@ class TestMixedRuleTypes:
         assert evaluator.evaluate(config, ctx(id="99")).value == "Percentage Group"
 
 
-class TestNoContext:
-    def test_returns_a_value_for_a_percentage_rule_when_no_context_is_provided(self) -> None:
-        config = Config(
-            id=CONFIG_ID,
-            key="config-without-rules",
-            type="string",
-            variations=[],
-            target=TargetingRules(
-                default_value="this-is-the-default",
-                rules=[
-                    PercentageRule(
-                        id=uid(),
-                        order=0,
-                        target="percentage",
-                        percentages=[Percentage(value="Only Group", percentage=100, id=uid())],
-                    )
-                ],
-            ),
+class TestContextsWithoutAnIdentifier:
+    def _rollout(self, order: int = 0) -> PercentageRule:
+        return PercentageRule(
+            id=uid(),
+            order=order,
+            target="percentage",
+            percentages=[Percentage(value="Only Group", percentage=100, id=uid())],
         )
 
-        assert evaluator.evaluate(config).value == "Only Group"
-
-    def test_always_assigns_the_first_non_empty_bucket_without_an_identifier(self) -> None:
-        config = Config(
+    def _config_with(self, *rules: Rule) -> Config:
+        return Config(
             id=CONFIG_ID,
-            key="config-without-rules",
+            key="config-with-a-rollout",
             type="string",
             variations=[],
-            target=TargetingRules(
-                default_value="this-is-the-default",
-                rules=[
-                    PercentageRule(
-                        id=uid(),
-                        order=0,
-                        target="percentage",
-                        percentages=[
-                            Percentage(value="never", percentage=0, id=uid()),
-                            Percentage(value="first", percentage=50, id=uid()),
-                            Percentage(value="second", percentage=50, id=uid()),
-                        ],
-                    )
-                ],
-            ),
+            target=TargetingRules(default_value="this-is-the-default", rules=list(rules)),
         )
 
-        for _ in range(50):
-            assert evaluator.evaluate(config).value == "first"
-            assert evaluator.evaluate(config, ctx()).value == "first"
+    def test_no_context_skips_a_percentage_rule_and_gets_the_default_targeting_rule_value(self) -> None:
+        state = evaluator.evaluate(self._config_with(self._rollout()))
+
+        assert state.value == "this-is-the-default"
+
+    def test_a_context_without_an_id_skips_a_percentage_rule_and_gets_the_default_targeting_rule_value(
+        self,
+    ) -> None:
+        state = evaluator.evaluate(self._config_with(self._rollout()), ctx(name="Ada"))
+
+        assert state.value == "this-is-the-default"
+
+    def test_a_context_without_an_id_skips_the_rollout_of_a_matching_conditional_rule(self) -> None:
+        config = self._config_with(
+            ConditionalRule(
+                id=uid(),
+                order=0,
+                target="percentage",
+                conditions=[name_is("Ada")],
+                percentages=[Percentage(value="Only Group", percentage=100, id=uid())],
+            )
+        )
+
+        state = evaluator.evaluate(config, ctx(name="Ada"))
+
+        assert state.value == "this-is-the-default"
+
+    def test_the_rules_after_a_skipped_rollout_are_not_tried(self) -> None:
+        config = self._config_with(
+            self._rollout(order=0),
+            ConditionalRule(id=uid(), order=1, value="Later Rule", conditions=[name_is("Ada")]),
+        )
+
+        state = evaluator.evaluate(config, ctx(name="Ada"))
+
+        assert state.value == "this-is-the-default"
+
+    def test_the_rules_after_a_conditional_rule_whose_conditions_do_not_match_are_tried(self) -> None:
+        config = self._config_with(
+            ConditionalRule(
+                id=uid(),
+                order=0,
+                target="percentage",
+                conditions=[name_is("Grace")],
+                percentages=[Percentage(value="Only Group", percentage=100, id=uid())],
+            ),
+            ConditionalRule(id=uid(), order=1, value="Later Rule", conditions=[name_is("Ada")]),
+        )
+
+        served_config = evaluator.evaluate_with_reason(config, ctx(name="Ada"))
+
+        assert served_config.state.value == "Later Rule"
+        assert served_config.reason == "found-match"
+
+    def test_a_rule_that_serves_a_single_value_still_applies(self) -> None:
+        config = self._config_with(
+            ConditionalRule(id=uid(), order=0, value="Single Value", conditions=[name_is("Ada")]),
+            self._rollout(order=1),
+        )
+
+        served_config = evaluator.evaluate_with_reason(config, ctx(name="Ada"))
+
+        assert served_config.state.value == "Single Value"
+        assert served_config.reason == "found-match"
+
+    def test_a_rule_without_percentages_is_not_a_skipped_rollout_and_the_next_rule_is_tried(self) -> None:
+        config = self._config_with(
+            ConditionalRule(
+                id=uid(), order=0, target="percentage", percentages=None, conditions=[name_is("Ada")]
+            ),
+            ConditionalRule(id=uid(), order=1, value="Later Rule", conditions=[name_is("Ada")]),
+        )
+
+        served_config = evaluator.evaluate_with_reason(config, ctx(name="Ada"))
+
+        assert served_config.state.value == "Later Rule"
+        assert served_config.reason == "found-match"
+
+    def test_a_rollout_whose_percentages_are_empty_is_skipped(self) -> None:
+        config = self._config_with(
+            PercentageRule(id=uid(), order=0, percentages=[]),
+            ConditionalRule(id=uid(), order=1, value="Later Rule", conditions=[name_is("Ada")]),
+        )
+
+        served_config = evaluator.evaluate_with_reason(config, ctx(name="Ada"))
+
+        assert served_config.state.value == "this-is-the-default"
+        assert served_config.reason == "rollout-skipped-no-identifier"
+
+    def test_a_skipped_rollout_gives_the_reason_for_the_skip(self) -> None:
+        served_config = evaluator.evaluate_with_reason(self._config_with(self._rollout()), ctx(name="Ada"))
+
+        assert served_config.reason == "rollout-skipped-no-identifier"
+
+    def test_a_context_with_an_id_is_served_the_rollout_with_a_found_match(self) -> None:
+        served_config = evaluator.evaluate_with_reason(self._config_with(self._rollout()), ctx(id="user-1"))
+
+        assert served_config.state.value == "Only Group"
+        assert served_config.reason == "found-match"
+
+    def test_the_default_targeting_rule_value_reached_without_a_rollout_is_a_found_match(self) -> None:
+        served_config = evaluator.evaluate_with_reason(self._config_with(), ctx(name="Ada"))
+
+        assert served_config.state.value == "this-is-the-default"
+        assert served_config.reason == "found-match"
 
 
 class TestPercentageRulesByKind:
@@ -545,10 +633,10 @@ class TestPercentageRulesByKind:
 
         assert state.value == "8 to 50"
 
-    def test_a_device_without_an_identifier_lands_in_the_first_bucket(self) -> None:
+    def test_a_device_without_an_identifier_skips_the_rollout(self) -> None:
         state = evaluator.evaluate(self._config_split_at_8_and_50(), ctx(kind="device"))
 
-        assert state.value == "below 8"
+        assert state.value == "this-is-the-default"
 
 
 @dataclass(frozen=True, slots=True)
@@ -856,3 +944,176 @@ class TestValueIds:
 
         assert state.value == "hello"
         assert state.value_id == "id-default"
+
+
+class TestVariationsAndRolloutShares:
+    CONTROL_ID = "77777777-7777-4777-8777-777777777777"
+    TREATMENT_ID = "88888888-8888-4888-8888-888888888888"
+    UNNAMED_ID = "99999999-9999-4999-8999-999999999999"
+    EMPTY_NAME_ID = "99999999-9999-4999-8999-99999999999a"
+    RULE_ID = "22222222-2222-4222-8222-222222222222"
+    SHARE_ID = "66666666-6666-4666-8666-666666666666"
+
+    def _treatment_share(self) -> Percentage:
+        return Percentage(
+            id=self.SHARE_ID,
+            percentage=100,
+            value="Try it free",
+            value_id="value-id-treatment",
+            variation_id=self.TREATMENT_ID,
+        )
+
+    def _experiment(self, *rules: Rule) -> Config:
+        return Config(
+            id=CONFIG_ID,
+            key="checkout-cta-copy",
+            type="string",
+            variations=[
+                ConfigVariation(id=self.CONTROL_ID, name="control", value="Start free trial"),
+                ConfigVariation(id=self.TREATMENT_ID, name="treatment", value="Try it free"),
+                ConfigVariation(id=self.UNNAMED_ID, name=None, value="Get started"),
+                ConfigVariation(id=self.EMPTY_NAME_ID, name="", value="Begin"),
+            ],
+            target=TargetingRules(
+                default_value="Start free trial",
+                default_value_id="value-id-control",
+                default_variation_id=self.CONTROL_ID,
+                rules=list(rules),
+            ),
+        )
+
+    def _rule_serving(self, value: str, variation_id: str) -> ConditionalRule:
+        return ConditionalRule(
+            id=self.RULE_ID,
+            order=0,
+            value=value,
+            value_id=f"value-id-{value}",
+            variation_id=variation_id,
+            conditions=[identifier_is("user-1")],
+        )
+
+    def test_a_percentage_rule_serves_the_variation_rule_and_share_of_its_bucket(self) -> None:
+        config = self._experiment(
+            PercentageRule(id=self.RULE_ID, order=0, percentages=[self._treatment_share()])
+        )
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state == ConfigState(
+            id=CONFIG_ID,
+            key="checkout-cta-copy",
+            type="string",
+            value="Try it free",
+            value_id="value-id-treatment",
+            variation=Variation(id=self.TREATMENT_ID, name="treatment"),
+            rule_id=self.RULE_ID,
+            share_id=self.SHARE_ID,
+        )
+
+    def test_a_conditional_rules_rollout_serves_the_variation_rule_and_share_of_its_bucket(self) -> None:
+        config = self._experiment(
+            ConditionalRule(
+                id=self.RULE_ID,
+                order=0,
+                target="percentage",
+                conditions=[identifier_is("user-1")],
+                percentages=[self._treatment_share()],
+            )
+        )
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.variation == Variation(id=self.TREATMENT_ID, name="treatment")
+        assert state.rule_id == self.RULE_ID
+        assert state.share_id == self.SHARE_ID
+
+    def test_a_conditional_rules_value_carries_its_variation_and_no_rule_or_share(self) -> None:
+        config = self._experiment(self._rule_serving("Try it free", self.TREATMENT_ID))
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.variation == Variation(id=self.TREATMENT_ID, name="treatment")
+        assert state.rule_id is None
+        assert state.share_id is None
+
+    def test_the_default_targeting_rule_value_carries_its_variation_and_no_rule_or_share(self) -> None:
+        state = evaluator.evaluate(self._experiment(), ctx(id="user-1"))
+
+        assert state.value == "Start free trial"
+        assert state.variation == Variation(id=self.CONTROL_ID, name="control")
+        assert state.rule_id is None
+        assert state.share_id is None
+
+    def test_a_skipped_rollout_carries_the_default_targeting_rule_values_variation_and_no_rule_or_share(
+        self,
+    ) -> None:
+        config = self._experiment(
+            PercentageRule(id=self.RULE_ID, order=0, percentages=[self._treatment_share()])
+        )
+
+        state = evaluator.evaluate(config, ctx(name="Ada"))
+
+        assert state.value == "Start free trial"
+        assert state.value_id == "value-id-control"
+        assert state.variation == Variation(id=self.CONTROL_ID, name="control")
+        assert state.rule_id is None
+        assert state.share_id is None
+
+    def test_a_variation_without_a_name_has_its_id_and_no_name(self) -> None:
+        config = self._experiment(self._rule_serving("Get started", self.UNNAMED_ID))
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.variation == Variation(id=self.UNNAMED_ID, name=None)
+
+    def test_a_variation_whose_name_is_empty_has_its_id_and_no_name(self) -> None:
+        config = self._experiment(self._rule_serving("Begin", self.EMPTY_NAME_ID))
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.variation == Variation(id=self.EMPTY_NAME_ID, name=None)
+
+    def test_a_variation_id_the_config_does_not_list_gives_no_variation(self) -> None:
+        config = self._experiment(self._rule_serving("Gone", "00000000-0000-4000-8000-000000000000"))
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.value == "Gone"
+        assert state.variation is None
+
+    def test_a_flag_in_a_rollout_carries_its_rule_and_share_and_no_variation(self) -> None:
+        config = Config(
+            id=CONFIG_ID,
+            key="dark-mode",
+            type="boolean",
+            target=TargetingRules(
+                default_value="false",
+                rules=[
+                    PercentageRule(
+                        id=self.RULE_ID,
+                        order=0,
+                        percentages=[Percentage(id=self.SHARE_ID, percentage=100, value="true")],
+                    )
+                ],
+            ),
+        )
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.variation is None
+        assert state.rule_id == self.RULE_ID
+        assert state.share_id == self.SHARE_ID
+
+    def test_a_flag_without_rules_carries_no_variation_rule_or_share(self) -> None:
+        config = Config(
+            id=CONFIG_ID,
+            key="dark-mode",
+            type="boolean",
+            target=TargetingRules(default_value="false", rules=[]),
+        )
+
+        state = evaluator.evaluate(config, ctx(id="user-1"))
+
+        assert state.variation is None
+        assert state.rule_id is None
+        assert state.share_id is None

@@ -64,8 +64,8 @@ key, a non-finite number, or an integer with too many digits to write out raise
 Reads behave as they do in production: `set_value("k", True)` read as a string returns the in-code
 default value with the `type-mismatch` reason, `set_value("k", 2.5)` read with an `int` default
 returns the default with the `invalid-number` reason, and `set_value("k", "")` serves the in-code
-default value with the `value-missing` reason. Reasons arrive on the `config_evaluated` event. JSON
-objects keep their insertion order.
+default value with the `value-missing` reason. Reasons arrive on `evaluate` and the
+`config_evaluated` event. JSON objects keep their insertion order.
 
 ### Controls
 

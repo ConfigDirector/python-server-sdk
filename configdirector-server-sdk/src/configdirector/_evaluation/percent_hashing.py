@@ -3,11 +3,9 @@ from __future__ import annotations
 from .._context_kind import DEFAULT_KIND
 from ._rapidhash import rapidhash
 
-__all__ = ["PERCENTAGE_WITHOUT_IDENTIFIER", "assign_percentage"]
+__all__ = ["assign_percentage"]
 
 _SEED = 0x397832987
-
-PERCENTAGE_WITHOUT_IDENTIFIER = 0.0
 
 
 def assign_percentage(config_id: str, context_identifier: str, context_kind: str) -> float:

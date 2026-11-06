@@ -4,7 +4,7 @@ import json
 import math
 from dataclasses import dataclass
 
-from .types import ConfigState, ConfigType, ConfigValue, EvaluationReason
+from .types import ConfigState, ConfigType, ConfigValue, EvaluationReason, Variation
 
 __all__ = ["ParseResult", "parse_config_value"]
 
@@ -22,6 +22,9 @@ class ParseResult:
     reason: EvaluationReason
     used_default: bool = False
     value_id: str | None = None
+    variation: Variation | None = None
+    rule_id: str | None = None
+    share_id: str | None = None
 
 
 # Coerces an evaluated config value into the type the caller asked for. The requested type comes
@@ -68,7 +71,14 @@ def parse_config_value(state: ConfigState, default: ConfigValue) -> ParseResult:
 
 
 def _matched(value: ConfigValue, state: ConfigState) -> ParseResult:
-    return ParseResult(value=value, reason="found-match", value_id=state.value_id)
+    return ParseResult(
+        value=value,
+        reason="found-match",
+        value_id=state.value_id,
+        variation=state.variation,
+        rule_id=state.rule_id,
+        share_id=state.share_id,
+    )
 
 
 def _parse_boolean(value: str) -> bool | None:
