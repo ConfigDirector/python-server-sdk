@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-06
+
 ### Added
 
 - The provider now implements OpenFeature's tracking. `client.track(event_name, context, details)`
@@ -41,6 +43,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   one.
 - Telemetry reports now write text outside ASCII as UTF-8 rather than as escape sequences, so they
   are smaller.
+- Requires `configdirector-server-sdk` 1.9.0 or later, which has the `evaluate` and `track` methods
+  the provider now calls.
 
 ### Fixed
 

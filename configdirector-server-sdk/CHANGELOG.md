@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-06
+
 ### Added
 
 - `track(event_name, context=None, *, value=None, details=None)` on the client reports to
