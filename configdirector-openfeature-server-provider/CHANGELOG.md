@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-11-07
+
 ### Fixed
 
 - An evaluation context with neither a targeting key nor an `id` attribute that skips a percentage
@@ -14,6 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   default targeting rule value, even when a later rule matched the context. A later rule that
   applies resolves with the reason `TARGETING_MATCH`; `DEFAULT` stays for a context resolved to the
   default targeting rule value after a skipped rollout.
+- Requires `configdirector-server-sdk` 1.9.1 or later, which carries the fix.
 
 ## [1.8.0] - 2026-11-06
 

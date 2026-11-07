@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-07
+
 ### Fixed
 
 - A context without an `id` that skips a percentage rollout is now served by the targeting rules
