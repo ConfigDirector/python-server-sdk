@@ -109,9 +109,9 @@ class Context:
         id: The user's identifier. This should uniquely identify an application user.
             For anonymous users you may generate a UUID or use a session ID. Keep in mind this
             value segments users in percentage rollouts, so changing it can move a user into a
-            different percentile. A context without an ``id`` skips percentage rollouts: it is
-            served the default targeting rule value, and the targeting rules after the rollout
-            are not tried.
+            different percentile. A context without an ``id`` skips percentage rollouts: the
+            targeting rules after the rollout are tried, and it is served the default targeting
+            rule value when none applies.
         name: The user's display name. Shown in the ConfigDirector dashboard and usable in
             targeting rules.
         traits: Arbitrary traits for the current user. Shown in the ConfigDirector dashboard

@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- A context without an `id` that skips a percentage rollout is now served by the targeting rules
+  after it, as it is after a conditional rule it does not match. Since 1.9.0 the skipped rollout
+  ended the evaluation and the default targeting rule value was served, even when a later rule,
+  such as one on the app version, matched the context. `get_value`, `evaluate`, watchers and
+  `get_all_configs` serve the later rule's value with the reason `found-match`; the reason
+  `rollout-skipped-no-identifier` stays for a context served the default targeting rule value
+  after a skipped rollout.
 - A `datetime` inside the `details` of `track`, at any depth, is now sent as ISO 8601 text, keeping
   its UTC offset if it has one, and counts toward the 1 KB limit as that text. Before, the details
   were left out with a warning. `TrackedEventDetailValue` now includes `datetime`, and the test

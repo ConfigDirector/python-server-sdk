@@ -66,7 +66,7 @@ new_checkout = client.get_boolean_value("new-checkout", False, device)
 
 Without a `kind` attribute the context is a `user`, and a `kind` inside `traits` is an ordinary trait. A kind has 1 to 64 characters, using only lowercase letters, digits, `-` and `_`. When the kind is invalid, including any kind that is not a string, the whole context is ignored: the evaluation still resolves successfully, to the value for no context, and the SDK logs an error.
 
-A context with neither a targeting key nor an `id` attribute skips percentage rollouts: the flag resolves to the default targeting rule value, and the targeting rules after the rollout are not tried. Give an anonymous context a stable targeting key, such as a session ID, to keep it in a rollout.
+A context with neither a targeting key nor an `id` attribute skips percentage rollouts: the targeting rules after the rollout are tried, and the flag resolves to the default targeting rule value when none applies. Give an anonymous context a stable targeting key, such as a session ID, to keep it in a rollout.
 
 ## Evaluation details
 

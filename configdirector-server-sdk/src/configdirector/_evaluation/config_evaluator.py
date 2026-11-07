@@ -82,18 +82,18 @@ class ConfigEvaluator:
             config.target.rules,
             key=lambda rule: _LAST if rule.order is None else rule.order,
         )
+        a_rollout_was_skipped = False
         for rule in rules:
             match self._evaluate_rule(rule, config, context, segments):
                 case _ServedValue() as served_value:
                     return _served_config(config, served_value, "found-match")
                 case _RolloutSkippedNoIdentifier():
-                    return _served_config(
-                        config, _default_targeting_rule_value(config), "rollout-skipped-no-identifier"
-                    )
+                    a_rollout_was_skipped = True
                 case _RuleNotMatched():
                     pass
 
-        return _served_config(config, _default_targeting_rule_value(config), "found-match")
+        reason: _ServingReason = "rollout-skipped-no-identifier" if a_rollout_was_skipped else "found-match"
+        return _served_config(config, _default_targeting_rule_value(config), reason)
 
     def _evaluate_rule(
         self, rule: Rule, config: Config, context: EvaluationContext | None, segments: Segments | None

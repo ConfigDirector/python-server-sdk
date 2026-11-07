@@ -513,15 +513,61 @@ class TestContextsWithoutAnIdentifier:
 
         assert state.value == "this-is-the-default"
 
-    def test_the_rules_after_a_skipped_rollout_are_not_tried(self) -> None:
+    def test_the_rules_after_a_skipped_rollout_are_tried(self) -> None:
         config = self._config_with(
             self._rollout(order=0),
             ConditionalRule(id=uid(), order=1, value="Later Rule", conditions=[name_is("Ada")]),
         )
 
-        state = evaluator.evaluate(config, ctx(name="Ada"))
+        served_config = evaluator.evaluate_with_reason(config, ctx(name="Ada"))
 
-        assert state.value == "this-is-the-default"
+        assert served_config.state.value == "Later Rule"
+        assert served_config.reason == "found-match"
+
+    def test_a_context_without_an_id_matching_a_conditional_rollout_is_served_a_later_rule_on_the_app_version(
+        self,
+    ) -> None:
+        app_version_is_at_least_2 = AttributeCondition(
+            id=uid(),
+            attribute="appVersion",
+            operator=">=",
+            trait=None,
+            target_type="semver",
+            target_values=["2.0.0"],
+        )
+        config = self._config_with(
+            ConditionalRule(
+                id=uid(),
+                order=0,
+                target="percentage",
+                conditions=[plan_is("pro")],
+                percentages=[Percentage(value="Only Group", percentage=100, id=uid())],
+            ),
+            ConditionalRule(
+                id=uid(), order=1, value="New copy for 2.x", conditions=[app_version_is_at_least_2]
+            ),
+        )
+        context = EvaluationContext(
+            context=Context(traits={"plan": "pro"}), metadata=Metadata(app_version="2.1.0")
+        )
+
+        served_config = evaluator.evaluate_with_reason(config, context)
+
+        assert served_config.state.value == "New copy for 2.x"
+        assert served_config.reason == "found-match"
+
+    def test_the_default_after_a_skipped_rollout_that_no_later_rule_matches_keeps_the_skip_reason(
+        self,
+    ) -> None:
+        config = self._config_with(
+            self._rollout(order=0),
+            ConditionalRule(id=uid(), order=1, value="Later Rule", conditions=[name_is("Grace")]),
+        )
+
+        served_config = evaluator.evaluate_with_reason(config, ctx(name="Ada"))
+
+        assert served_config.state.value == "this-is-the-default"
+        assert served_config.reason == "rollout-skipped-no-identifier"
 
     def test_the_rules_after_a_conditional_rule_whose_conditions_do_not_match_are_tried(self) -> None:
         config = self._config_with(
@@ -564,7 +610,7 @@ class TestContextsWithoutAnIdentifier:
         assert served_config.state.value == "Later Rule"
         assert served_config.reason == "found-match"
 
-    def test_a_rollout_whose_percentages_are_empty_is_skipped(self) -> None:
+    def test_a_rollout_whose_percentages_are_empty_is_skipped_and_the_next_rule_is_tried(self) -> None:
         config = self._config_with(
             PercentageRule(id=uid(), order=0, percentages=[]),
             ConditionalRule(id=uid(), order=1, value="Later Rule", conditions=[name_is("Ada")]),
@@ -572,8 +618,8 @@ class TestContextsWithoutAnIdentifier:
 
         served_config = evaluator.evaluate_with_reason(config, ctx(name="Ada"))
 
-        assert served_config.state.value == "this-is-the-default"
-        assert served_config.reason == "rollout-skipped-no-identifier"
+        assert served_config.state.value == "Later Rule"
+        assert served_config.reason == "found-match"
 
     def test_a_skipped_rollout_gives_the_reason_for_the_skip(self) -> None:
         served_config = evaluator.evaluate_with_reason(self._config_with(self._rollout()), ctx(name="Ada"))

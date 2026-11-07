@@ -245,6 +245,35 @@ class TestEvaluate:
             variation=Variation(id=CONTROL_ID, name="control"),
         )
 
+    def test_serves_a_context_without_an_id_the_rule_after_a_skipped_rollout(
+        self, client: _ConfigDirectorClient, transports: TransportRecorder
+    ) -> None:
+        pro_plans_get_begin = {
+            "id": "33333333-3333-4333-8333-333333333335",
+            "order": 3,
+            "type": "conditional",
+            "target": "value",
+            "value": "Begin",
+            "valueId": "value-id-begin",
+            "variationId": EMPTY_NAME_ID,
+            "conditions": [plan_is("pro")],
+        }
+        experiment = experiment_with_rollout(treatment_share(TREATMENT_SHARE_ID, 100))
+        experiment["target"]["rules"].append(pro_plans_get_begin)
+        transports.last.deliver(payload_with(experiment))
+
+        evaluation = client.evaluate("checkout-cta-copy", "in-code default", PRO_CONTEXT_WITHOUT_AN_ID)
+
+        assert evaluation == ConfigEvaluation(
+            key="checkout-cta-copy",
+            value="Begin",
+            is_default=False,
+            reason="found-match",
+            value_id="value-id-begin",
+            context=PRO_CONTEXT_WITHOUT_AN_ID,
+            variation=Variation(id=EMPTY_NAME_ID, name=None),
+        )
+
     def test_serves_a_read_without_a_context_that_reaches_a_rollout_the_default_targeting_rule_value(
         self, client: _ConfigDirectorClient
     ) -> None:
