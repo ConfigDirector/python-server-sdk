@@ -38,7 +38,7 @@ The SDK reports an SDK name and version in the `User-Agent` header and in teleme
 built on the SDK reports its own, without the SDK accepting an identity from its caller:
 `configdirector._wrappers.Wrapper` is a closed list of the packages allowed to, each mapped to the
 distribution whose installed version the SDK reads for itself. Adding a wrapper package means
-adding a member there, releasing the SDK, and adding the new name to `deprecated-sdk-versions.ts`
+adding a member there, releasing the SDK, and adding the new name to `DeprecatedSdkVersions.ts`
 in the core API.
 
 ## Releasing
