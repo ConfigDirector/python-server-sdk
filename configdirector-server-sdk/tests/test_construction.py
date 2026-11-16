@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from configdirector import (
@@ -98,3 +100,28 @@ def test_accepts_a_custom_url(build: ClientBuilder, transports: TransportRecorde
 def test_rejects_an_invalid_url(build: ClientBuilder, url: str) -> None:
     with pytest.raises(ConfigDirectorValidationError, match="Invalid base URL"):
         build(SDK_KEY, connection=ConnectionOptions(url=url))
+
+
+def test_metadata_reads_an_app_version_given_as_an_int_as_its_digits() -> None:
+    assert Metadata(app_version=2).app_version == "2"  # type: ignore[arg-type]
+
+
+def test_metadata_reads_an_app_version_given_as_a_float_as_its_text() -> None:
+    assert Metadata(app_version=1.4).app_version == "1.4"  # type: ignore[arg-type]
+
+
+def test_metadata_reads_an_app_name_given_as_an_int_as_its_digits() -> None:
+    assert Metadata(app_name=5).app_name == "5"  # type: ignore[arg-type]
+
+
+def test_metadata_reads_an_app_version_given_to_replace_as_it_reads_the_one_it_is_built_with() -> None:
+    metadata = dataclasses.replace(Metadata(app_name="checkout"), app_version=2)  # type: ignore[arg-type]
+
+    assert metadata == Metadata(app_name="checkout", app_version="2")
+
+
+def test_metadata_has_no_app_name_and_no_app_version_unless_told_otherwise() -> None:
+    metadata = Metadata()
+
+    assert metadata.app_name is None
+    assert metadata.app_version is None

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from configdirector import ConnectionOptions, Metadata, __version__, create_client
 from configdirector._bundle import ConfigBundle
 from configdirector._transport import (
     PollingTransport,
@@ -421,6 +422,34 @@ class TestStreamingTransport:
         assert server.paths == ["/server/sse/v1"]
         assert server.requests[0]["serverSdkKey"] == "sdk-key"
         assert sink.keys == [["greeting"]]
+
+    def test_a_client_sends_an_app_version_given_as_a_number_as_text(
+        self, serve: Callable[[Handler], _Server]
+    ) -> None:
+        def handle(request: http.server.BaseHTTPRequestHandler) -> None:
+            sse_headers(request)
+            request.wfile.write(f"data: {bundle_json('greeting')}\n\n".encode())
+            request.wfile.flush()
+
+        server = serve(handle)
+        client = create_client(
+            "sdk-key",
+            metadata=Metadata(app_name="checkout", app_version=2),  # type: ignore[arg-type]
+            connection=ConnectionOptions(url=server.url),
+        )
+
+        try:
+            client.initialize()
+        finally:
+            client.close()
+
+        assert server.paths[0] == "/server/sse/v1"
+        assert server.requests[0]["metaContext"] == {
+            "sdkName": "python-server-sdk",
+            "sdkVersion": __version__,
+            "appName": "checkout",
+            "appVersion": "2",
+        }
 
     def test_connect_returns_once_the_stream_is_open(
         self, serve: Callable[[Handler], _Server], sink: Sink, logger: RecordingLogger

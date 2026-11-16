@@ -162,10 +162,26 @@ class Metadata:
 
     It is recommended you supply these values when creating a client so that they can be
     referenced from targeting rules.
+
+    Attributes:
+        app_name: The name of your application. A value that is not a ``str`` is read as its
+            text.
+        app_version: The version of your application. A value that is not a ``str``, such as the
+            build number ``2``, is read as its text, ``"2"``.
     """
 
     app_name: str | None = None
     app_version: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "app_name", _text_or_none(self.app_name))
+        object.__setattr__(self, "app_version", _text_or_none(self.app_version))
+
+
+def _text_or_none(value: object) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    return str(value)
 
 
 @dataclass(frozen=True, slots=True)

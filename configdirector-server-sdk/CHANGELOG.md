@@ -8,6 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- An `app_name` or `app_version` in `Metadata` that is not a `str`, such as the build number in
+  `Metadata(app_version=2)`, is now read as its text, `"2"`, both when the `Metadata` is built and
+  through `dataclasses.replace`. That text is what the client sends and what app name and app
+  version conditions compare. Before, the number was sent as given, ConfigDirector refused the
+  connection, and the client never became ready, so every read returned its in-code default
+  value. The annotations stay `str | None`, so a type checker still reports a number.
+
 ## [1.9.1] - 2026-11-07
 
 ### Fixed
