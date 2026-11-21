@@ -16,6 +16,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   version conditions compare. Before, the number was sent as given, ConfigDirector refused the
   connection, and the client never became ready, so every read returned its in-code default
   value. The annotations stay `str | None`, so a type checker still reports a number.
+- A client created before its process forked now keeps working in the forked process, with
+  nothing for the application to call. Before, a server that loads the application and then forks
+  its workers, such as Gunicorn with `--preload`, uWSGI without `lazy-apps`, Celery's prefork pool
+  or `multiprocessing` with the fork start method, left every worker serving the values it held at
+  the fork: it received no update and sent no telemetry, and nothing was logged. Now, at the fork:
+  - A streaming or polling client on which `initialize()` was called serves the copied values at
+    once and opens its own connection in the background: a stream, or a poll at the fork and then
+    on the polling interval. `os.fork()` does not wait for that connection. Each forked process
+    counts as one more connection.
+  - Watches and handlers registered before the fork keep being called in the forked process. In
+    streaming mode it calls the `configs_updated` handlers with every key, and every watch, once
+    shortly after the fork, even when nothing changed. `client_ready` is not emitted again for a
+    client that was ready.
+  - The forked process reports what it evaluates and tracks, first 5 seconds after the fork and
+    then on the flush interval. What was collected before the fork is reported once, by the
+    process that forked. This also holds for a client that was created before the fork and
+    initialized after it.
+  - `close()` and a second `initialize()` in the forked process act on that process's own
+    connection. Before, either one ended the stream of the process that forked, which then
+    reconnected.
+  - A client that was never initialized, was closed, runs in offline mode or was refused by
+    ConfigDirector opens no connection in the forked process, and neither does a test client.
+  - A client that restarts logs `Restarting the connection in forked process <pid>` at debug level,
+    and an error if the connection or the telemetry could not be restarted.
+
+  uWSGI runs this only with `py-call-osafterfork` set, because without it uWSGI does not tell
+  Python that a worker was forked. Nothing changes on Windows, which cannot fork a process.
 
 ## [1.9.1] - 2026-11-07
 

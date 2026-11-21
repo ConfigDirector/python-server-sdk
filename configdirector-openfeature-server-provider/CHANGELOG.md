@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- A provider set before its process forked now keeps resolving current values in the forked
+  process, with nothing for the application to call. Before, a server that loads the application
+  and then forks its workers, such as Gunicorn with `--preload`, left every worker resolving the
+  values it held at the fork, without updates or telemetry. Each forked process now opens its own
+  connection to ConfigDirector and reports what it evaluates and tracks. The fix is in
+  `configdirector-server-sdk`, and installing the SDK release that carries it is enough. Under
+  uWSGI, set `py-call-osafterfork`. Handlers added through the OpenFeature API can still be called
+  late in a forked process: with `openfeature-sdk` 0.10.0, the first handler calls there wait until
+  a later event. Flag values are not affected.
+
 ## [1.8.1] - 2026-11-07
 
 ### Fixed

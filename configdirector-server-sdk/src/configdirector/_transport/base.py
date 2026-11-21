@@ -60,6 +60,8 @@ class Transport(Protocol):
 
     def close(self) -> None: ...
 
+    def restart_in_forked_process(self) -> None: ...
+
 
 def resolve(base_url: str, path: str) -> str:
     # The trailing slash is what keeps urljoin from treating the last segment of a proxy base

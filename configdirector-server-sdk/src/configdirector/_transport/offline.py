@@ -46,6 +46,9 @@ class OfflineTransport:
     def close(self) -> None:
         self._connected = False
 
+    def restart_in_forked_process(self) -> None:
+        return None
+
 
 def _offline_configs(source: OfflineSource) -> dict[str, Config]:
     match source:

@@ -33,3 +33,6 @@ class DiscardingTelemetry:
 
     def close(self) -> None:
         return None
+
+    def restart_in_forked_process(self) -> None:
+        return None

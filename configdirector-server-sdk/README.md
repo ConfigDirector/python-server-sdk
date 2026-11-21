@@ -164,6 +164,16 @@ def test_new_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
   event handler has been removed, the test client's controls are silent no-ops, and no SDK thread
   is left running.
 
+## Servers that fork their workers
+
+A client created before its process forked keeps working in the forked process, with nothing for
+your application to call: under Gunicorn with `--preload`, Celery's prefork pool or
+`multiprocessing` with the fork start method, each worker serves the values the client held at the
+fork, opens its own connection and reports what it evaluates. uWSGI needs `py-call-osafterfork`
+set for this. Each process that holds an initialized client counts as one connection. See
+[Servers that fork their workers](https://docs.configdirector.com/sdks/server/python#servers-that-fork-their-workers)
+in the documentation.
+
 ## Documentation
 
 Refer to the [official documentation for the Python SDK](https://docs.configdirector.com/sdks/server/python).

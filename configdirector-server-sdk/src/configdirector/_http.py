@@ -74,6 +74,9 @@ class HttpClient:
         """Releases pooled connections. A request already in flight is its caller's to finish."""
         self._pool.clear()
 
+    def leave_connections_to_the_parent_process(self) -> None:
+        self._pool = urllib3.PoolManager()
+
 
 def _read_text(response: BaseHTTPResponse) -> str:
     payload = response.read(MAX_RESPONSE_BYTES + 1)

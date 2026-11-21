@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -171,6 +173,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
         # Built last, and deliberately so: it starts a background flush thread, which would
         # outlive the client if anything above this line raised.
         self._telemetry: TelemetryProtocol = self._build_telemetry(telemetry_factory, meta_context)
+        _UNCLOSED_CLIENTS.add(self)
 
     def _build_transport(
         self,
@@ -293,6 +296,7 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             for handlers in self._event_handlers.values():
                 handlers.clear()
 
+        _UNCLOSED_CLIENTS.discard(self)
         self._ready_event.set()  # release anyone still blocked in initialize()
         self._transport.close()
         self._telemetry.close()  # reports whatever was evaluated since the last flush
@@ -680,6 +684,38 @@ class _ConfigDirectorClient(ConfigDirectorClient):
             raise ConfigDirectorValidationError(
                 "This client has been closed and can no longer be used. Create a new one instead."
             )
+
+    def _restart_in_forked_process(self) -> None:
+        self._lock = threading.RLock()
+        self._ready_event = threading.Event()
+        if self._ready or self._closed:
+            self._ready_event.set()
+        if self._closed:
+            return
+
+        self._http.leave_connections_to_the_parent_process()
+        try:
+            self._telemetry.restart_in_forked_process()
+        except Exception as error:
+            self._logger.error("Failed to restart telemetry in forked process %d: %r", os.getpid(), error)
+        try:
+            self._transport.restart_in_forked_process()
+        except Exception as error:
+            self._logger.error(
+                "Failed to restart the connection in forked process %d: %r", os.getpid(), error
+            )
+
+
+_UNCLOSED_CLIENTS: weakref.WeakSet[_ConfigDirectorClient] = weakref.WeakSet()
+
+
+def _restart_unclosed_clients_in_forked_process() -> None:
+    for client in list(_UNCLOSED_CLIENTS):
+        client._restart_in_forked_process()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_restart_unclosed_clients_in_forked_process)
 
 
 def create_client(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,7 @@ from tests.helpers import (
     POLLING_PATH,
     TELEMETRY_PATH,
     FakeConfigDirectorServer,
+    ForkedProcess,
     config,
     rule,
     wait_for,
@@ -602,6 +604,24 @@ class TestLifecycle:
         api.set_provider_and_wait(provide(server))
 
         assert len(ready) == 1
+
+    @pytest.mark.skipif(not hasattr(os, "fork"), reason="This platform cannot fork a process")
+    @pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
+    def test_a_provider_set_before_a_fork_resolves_a_value_pushed_after_it_in_the_forked_process(
+        self, serve: ServerFactory, provide: ProviderFactory
+    ) -> None:
+        server = serve(config("greeting", "string", "before the fork"))
+        api.set_provider_and_wait(provide(server, mode="streaming"))
+        client = api.get_client()
+
+        def greeting_once_pushed() -> str:
+            wait_for(lambda: client.get_string_value("greeting", "in-code default") == "after the fork")
+            return client.get_string_value("greeting", "in-code default")
+
+        forked_process = ForkedProcess(greeting_once_pushed)
+        server.push(config("greeting", "string", "after the fork"))
+
+        assert forked_process.reported_text() == "after the fork"
 
     def test_shutting_down_closes_the_client(self, serve: ServerFactory, provide: ProviderFactory) -> None:
         provider = provide(serve())

@@ -228,6 +228,9 @@ class _Attempts:
         self._connected = False
         self._connection._close_transport()
 
+    def restart_in_forked_process(self) -> None:
+        return None
+
 
 class _TrackedEventRecordingTelemetry(DiscardingTelemetry):
     def __init__(self, logger: ConfigDirectorLogger, tracked_events: list[TrackedEvent]) -> None:

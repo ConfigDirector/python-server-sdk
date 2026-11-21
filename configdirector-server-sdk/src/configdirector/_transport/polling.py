@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 from typing import NoReturn
@@ -39,6 +40,7 @@ class PollingTransport:
         self._lock = threading.Lock()
 
     def connect(self, timeout: float) -> None:
+        self._poll_timeout = timeout
         try:
             self._fetch(timeout)
         finally:
@@ -46,7 +48,7 @@ class PollingTransport:
             # connection, so polling starts either way. An unrecoverable one has already closed
             # the transport and must not be retried.
             if not self._has_failed_fatally():
-                self._start_polling(timeout)
+                self._start_polling(timeout, first_poll_after=self._interval)
 
     @property
     def is_connected(self) -> bool:
@@ -65,9 +67,20 @@ class PollingTransport:
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=_JOIN_TIMEOUT)
 
+    def restart_in_forked_process(self) -> None:
+        polled_in_the_parent_process = self._thread is not None
+        self._lock = threading.Lock()
+        if not polled_in_the_parent_process:
+            return
+        self._logger.debug("Restarting the connection in forked process %d", os.getpid())
+        self._session_id = str(uuid.uuid4())
+        self._stop = threading.Event()
+        self._thread = None
+        self._start_polling(self._poll_timeout, first_poll_after=0.0)
+
     # -- polling loop -----------------------------------------------------------------------
 
-    def _start_polling(self, timeout: float) -> None:
+    def _start_polling(self, timeout: float, first_poll_after: float) -> None:
         if self._interval <= 0:
             return
         with self._lock:
@@ -76,14 +89,16 @@ class PollingTransport:
             self._stop.clear()
             self._thread = threading.Thread(
                 target=self._poll,
-                args=(timeout,),
+                args=(timeout, first_poll_after),
                 name="configdirector-polling",
                 daemon=True,
             )
             self._thread.start()
 
-    def _poll(self, timeout: float) -> None:
-        while not self._stop.wait(self._interval):
+    def _poll(self, timeout: float, first_poll_after: float) -> None:
+        next_poll_after = first_poll_after
+        while not self._stop.wait(next_poll_after):
+            next_poll_after = self._interval
             try:
                 self._fetch(timeout)
             except ConfigDirectorConnectionError as error:

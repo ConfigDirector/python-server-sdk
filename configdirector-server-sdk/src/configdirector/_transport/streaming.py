@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 
@@ -67,7 +68,26 @@ class StreamingTransport:
 
     def connect(self, timeout: float) -> None:
         self.close()
-        self._settled.clear()
+        self._open_stream()
+
+        # Returning on the timeout is not a failure: the stream keeps retrying in the
+        # background, and the client reports itself unready until config state arrives.
+        self._settled.wait(timeout)
+        if self._fatal_error is not None:
+            raise self._fatal_error
+
+    def restart_in_forked_process(self) -> None:
+        if not self._holds_a_stream:
+            return
+        self._logger.debug("Restarting the connection in forked process %d", os.getpid())
+        self._open_stream()
+
+    @property
+    def _holds_a_stream(self) -> bool:
+        return self._client is not None and self._fatal_error is None
+
+    def _open_stream(self) -> None:
+        self._settled = threading.Event()
         self._fatal_error = None
 
         client = EventSourceClient(
@@ -87,12 +107,6 @@ class StreamingTransport:
         self._client = client
         client.connect()
         self._start_heartbeat()
-
-        # Returning on the timeout is not a failure: the stream keeps retrying in the
-        # background, and the client reports itself unready until config state arrives.
-        self._settled.wait(timeout)
-        if self._fatal_error is not None:
-            raise self._fatal_error
 
     @property
     def read_timeout(self) -> float | None:

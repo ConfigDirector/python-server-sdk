@@ -36,7 +36,7 @@ from configdirector.types import (
 )
 
 WAIT_TIMEOUT = 5.0
-_NEVER = 3_600.0
+NEVER = 3_600.0
 
 
 def wait_for(predicate: Callable[[], bool], *, timeout: float = WAIT_TIMEOUT) -> bool:
@@ -133,6 +133,7 @@ class FakeTransport:
         self.options = options
         self.connect_timeouts: list[float] = []
         self.closed = False
+        self.restarts_in_forked_processes = 0
         self._recorder = recorder
 
     def connect(self, timeout: float) -> None:
@@ -153,6 +154,9 @@ class FakeTransport:
 
     def close(self) -> None:
         self.closed = True
+
+    def restart_in_forked_process(self) -> None:
+        self.restarts_in_forked_processes += 1
 
 
 class TransportRecorder:
@@ -195,6 +199,7 @@ class FakeTelemetryCollector:
         self.invalid_kind_samples: list[str] = []
         self.tracked_event_admissions: list[TrackedEventAdmission] = []
         self.closed = False
+        self.restarts_in_forked_processes = 0
 
     def record_evaluation(
         self,
@@ -240,6 +245,9 @@ class FakeTelemetryCollector:
     def close(self) -> None:
         self.closed = True
 
+    def restart_in_forked_process(self) -> None:
+        self.restarts_in_forked_processes += 1
+
 
 class TelemetryRecorder:
     def __init__(self) -> None:
@@ -269,8 +277,8 @@ class ReportingTelemetry:
             replace(
                 options,
                 http=cast(_http.HttpClient, self._http),
-                flush_interval=_NEVER,
-                initial_flush_delay=_NEVER,
+                flush_interval=NEVER,
+                initial_flush_delay=NEVER,
             )
         )
         self.collectors.append(collector)

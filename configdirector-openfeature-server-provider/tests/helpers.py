@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import http.server
 import json
-import queue
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -79,7 +79,7 @@ class FakeConfigDirectorServer:
                 elif self.path == STREAMING_PATH:
                     outer._stream(self)
                 elif self.path == POLLING_PATH and outer.available:
-                    outer._respond(self, 200, outer._bundle)
+                    outer._respond(self, 200, outer._bundles[-1])
                 elif self.path == POLLING_PATH:
                     outer._respond(self, 503, "")
                 else:
@@ -88,13 +88,13 @@ class FakeConfigDirectorServer:
             def log_message(self, *args: object) -> None:
                 pass
 
-        self._bundle = bundle(*configs)
-        self._pushed: queue.Queue[str] = queue.Queue()
+        self._bundles = [bundle(*configs)]
+        self._bundle_pushed = threading.Condition()
         self.available = True
         self.accepts_the_sdk_key = True
         self.stream_released = threading.Event()
         self.stream_released.set()
-        self._closing = threading.Event()
+        self._closing = False
         self.requests: list[Request] = []
         self._httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), RequestHandler)
         self._httpd.daemon_threads = True
@@ -109,13 +109,17 @@ class FakeConfigDirectorServer:
         return f"http://{host!s}:{port!s}"
 
     def push(self, *configs: dict[str, Any]) -> None:
-        self._pushed.put(bundle(*configs))
+        with self._bundle_pushed:
+            self._bundles.append(bundle(*configs))
+            self._bundle_pushed.notify_all()
 
     def requests_to(self, path: str) -> list[Request]:
         return [request for request in list(self.requests) if request.path == path]
 
     def close(self) -> None:
-        self._closing.set()
+        with self._bundle_pushed:
+            self._closing = True
+            self._bundle_pushed.notify_all()
         self.stream_released.set()
         self._httpd.shutdown()
         self._httpd.server_close()
@@ -136,20 +140,45 @@ class FakeConfigDirectorServer:
         request.end_headers()
         request.wfile.flush()
         self.stream_released.wait()
-        if self._closing.is_set():
-            return
+        with self._bundle_pushed:
+            next_unsent = len(self._bundles) - 1
         try:
-            request.wfile.write(f"data: {self._bundle}\n\n".encode())
-            request.wfile.flush()
-            while not self._closing.is_set():
-                try:
-                    pushed = self._pushed.get(timeout=0.05)
-                except queue.Empty:
-                    continue
-                request.wfile.write(f"data: {pushed}\n\n".encode())
-                request.wfile.flush()
+            while True:
+                with self._bundle_pushed:
+                    if self._closing:
+                        return
+                    unsent = self._bundles[next_unsent:]
+                for pushed in unsent:
+                    request.wfile.write(f"data: {pushed}\n\n".encode())
+                    request.wfile.flush()
+                next_unsent += len(unsent)
+                with self._bundle_pushed:
+                    if len(self._bundles) == next_unsent:
+                        self._bundle_pushed.wait(timeout=0.05)
         except OSError:
             return
+
+
+class ForkedProcess:
+    def __init__(self, text_to_report: Callable[[], str]) -> None:
+        reported_text, report = os.pipe()
+        self._process_id = os.fork()
+        if self._process_id == 0:
+            exit_code = 1
+            try:
+                os.write(report, text_to_report().encode())
+                exit_code = 0
+            finally:
+                os._exit(exit_code)
+        os.close(report)
+        self._reported_text = reported_text
+
+    def reported_text(self) -> str:
+        try:
+            return os.read(self._reported_text, 65536).decode()
+        finally:
+            os.close(self._reported_text)
+            os.waitpid(self._process_id, 0)
 
 
 def wait_for(condition: Callable[[], bool], timeout: float = 5.0) -> None:

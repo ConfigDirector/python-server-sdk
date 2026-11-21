@@ -89,6 +89,8 @@ class TelemetryProtocol(Protocol):
 
     def close(self) -> None: ...
 
+    def restart_in_forked_process(self) -> None: ...
+
 
 class TelemetryCollector:
     def __init__(self, options: TelemetryCollectorOptions) -> None:
@@ -104,23 +106,12 @@ class TelemetryCollector:
             http=options.http,
         )
 
-        limit = options.event_queue_limit
-        evaluation_limit = limit * _EVALUATION_SHARE // 10
-        self._events = EventQueue(evaluation_limit)
-        self._contexts = ContextRegistry(limit - evaluation_limit)
-        self._invalid_contexts = InvalidContextSubmissions()
-        self._invalid_contexts_after_stopping = InvalidContextSubmissions()
-        self._tracked_events = TrackedEventQueue()
-
-        self._lock = threading.Lock()
-        # Held for the whole of a flush, so that a report triggered by close() cannot overtake
-        # one the interval already started.
-        self._flush_lock = threading.Lock()
+        self._event_queue_limit = options.event_queue_limit
         self._collecting = True
         self._closed = False
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="configdirector-telemetry", daemon=True)
-        self._thread.start()
+        self._begin_with_nothing_collected()
+        self._begin_with_unheld_locks()
+        self._begin_reporting_on_the_interval()
 
     # On the client's hot path, so this returns without doing any appreciable work.
     def record_evaluation(
@@ -230,6 +221,32 @@ class TelemetryCollector:
         self._contexts.clear()
         self._invalid_contexts.clear()
         self._tracked_events.clear()
+
+    def restart_in_forked_process(self) -> None:
+        reported_in_the_parent_process = self._collecting
+        self._begin_with_nothing_collected()
+        self._begin_with_unheld_locks()
+        if reported_in_the_parent_process:
+            self._begin_reporting_on_the_interval()
+
+    def _begin_with_nothing_collected(self) -> None:
+        evaluation_limit = self._event_queue_limit * _EVALUATION_SHARE // 10
+        self._events = EventQueue(evaluation_limit)
+        self._contexts = ContextRegistry(self._event_queue_limit - evaluation_limit)
+        self._invalid_contexts = InvalidContextSubmissions()
+        self._invalid_contexts_after_stopping = InvalidContextSubmissions()
+        self._tracked_events = TrackedEventQueue()
+
+    def _begin_with_unheld_locks(self) -> None:
+        self._lock = threading.Lock()
+        # Held for the whole of a flush, so that a report triggered by close() cannot overtake
+        # one the interval already started.
+        self._flush_lock = threading.Lock()
+
+    def _begin_reporting_on_the_interval(self) -> None:
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="configdirector-telemetry", daemon=True)
+        self._thread.start()
 
     def _run(self) -> None:
         delay = self._initial_flush_delay
