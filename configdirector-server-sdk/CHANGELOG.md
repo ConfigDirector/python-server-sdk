@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-11-22
+
 ### Fixed
 
 - An `app_name` or `app_version` in `Metadata` that is not a `str`, such as the build number in

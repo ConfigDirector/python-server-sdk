@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-11-22
+
 ### Fixed
 
 - A provider set before its process forked now keeps resolving current values in the forked
@@ -17,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   uWSGI, set `py-call-osafterfork`. Handlers added through the OpenFeature API can still be called
   late in a forked process: with `openfeature-sdk` 0.10.0, the first handler calls there wait until
   a later event. Flag values are not affected.
+- Requires `configdirector-server-sdk` 1.9.2 or later, which carries the fix.
 
 ## [1.8.1] - 2026-11-07
 
